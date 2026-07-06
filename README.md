@@ -1,4 +1,4 @@
-# GRPCGateway — C++ WebSocket JSON-RPC 网关
+# RPCGateway — C++ WebSocket JSON-RPC 网关
 
 > WebServer 微服务架构的**前置网关**，负责统一协议转换、请求路由和业务分发。
 
@@ -11,7 +11,7 @@
 
 ## 📖 概述
 
-GRPCGateway 是 WebServer 微服务架构的**统一网络入口**。它基于 Boost.Beast + Boost.Asio 实现 WebSocket 服务端，使用 **JSON-RPC 2.0** 协议替代传统的 HTTP REST API，实现前后端的高效 RPC 通信。
+RPCGateway 是 WebServer 微服务架构的**统一网络入口**。它基于 Boost.Beast + Boost.Asio 实现 WebSocket 服务端，使用 **JSON-RPC 2.0** 协议替代传统的 HTTP REST API，实现前后端的高效 RPC 通信。
 
 > **原名**：原单体架构中的 `cpp_WebServer`，在微服务架构演进中剥离为独立网关服务。
 
@@ -33,7 +33,7 @@ GRPCGateway 是 WebServer 微服务架构的**统一网络入口**。它基于 B
 
 ```
 ┌──────────────┐     WebSocket      ┌──────────────────────────────┐
-│   Vue 前端    │ ◄───────────────► │      GRPCGateway             │
+│   Vue 前端    │ ◄───────────────► │      RPCGateway              │
 │  (gRPC-Web)   │   JSON-RPC 2.0    │                              │
 └──────────────┘                    │  ┌─ RPCServer ─────────────┐ │
                                     │  │  • WebSocket 服务端      │ │
@@ -67,7 +67,7 @@ GRPCGateway 是 WebServer 微服务架构的**统一网络入口**。它基于 B
 ## 📂 项目结构
 
 ```
-GRPCGateway/
+RPCGateway/
 ├── source/                        # 源代码
 │   ├── main.cpp                   # 程序入口：初始化 MySQL，启动 RPC
 │   ├── ServerInit.h               # 全局变量声明、初始化函数
@@ -100,8 +100,8 @@ GRPCGateway/
 
 ```bash
 # 克隆仓库（如果是独立使用）
-git clone https://github.com/jyoushitou/WebService_cpp_GRPCGateway.git
-cd GRPCGateway
+git clone https://github.com/jyoushitou/WebService_cpp_RPCGateway.git
+cd RPCGateway
 
 # 构建
 mkdir build && cd build
@@ -109,14 +109,15 @@ cmake ..
 cmake --build .
 
 # 运行（默认端口 60906）
-./GRPCGateway
+./RPCGateway
 ```
 
 ---
 
 ## 🔌 RPC 接口文档
 
-GRPCGateway 使用 **JSON-RPC 2.0** 协议，通过 WebSocket 通信。
+
+RPCGateway 使用 **JSON-RPC 2.0** 协议，通过 WebSocket 通信。
 
 ### JSON-RPC 请求格式
 
@@ -206,5 +207,5 @@ GRPCGateway 使用 **JSON-RPC 2.0** 协议，通过 WebSocket 通信。
 
 ## 📬 联系方式
 
-- 仓库地址：[https://github.com/jyoushitou/WebService_cpp_GRPCGateway.git](https://github.com/jyoushitou/WebService_cpp_GRPCGateway.git)
+- 仓库地址：[https://github.com/jyoushitou/WebService_cpp_RPCGateway.git](https://github.com/jyoushitou/WebService_cpp_RPCGateway.git)
 - 父项目：[WebServer](https://github.com/jyoushitou/WebServer)
