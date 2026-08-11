@@ -1,0 +1,10 @@
+^D:\WEBSERVER\RPCGATEWAY\SOURCE\CMAKELISTS.TXT
+setlocal
+E:\app\Cmake\bin\cmake.exe -SD:/WebServer/RPCGateway/source -BD:/WebServer/RPCGateway/build --check-stamp-file D:/WebServer/RPCGateway/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

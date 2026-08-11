@@ -1,0 +1,9 @@
+D:\WebServer\RPCGateway\source\main.cpp;D:\WebServer\RPCGateway\build\GateWay.dir\Debug\main.obj
+D:\WebServer\common\body\Common.pb.cc;D:\WebServer\RPCGateway\build\GateWay.dir\Debug\Common.pb.obj
+D:\WebServer\common\body\Utils.cpp;D:\WebServer\RPCGateway\build\GateWay.dir\Debug\Utils.obj
+D:\WebServer\common\body\ThreadPool.cpp;D:\WebServer\RPCGateway\build\GateWay.dir\Debug\ThreadPool.obj
+D:\WebServer\common\body\NetConnection.cpp;D:\WebServer\RPCGateway\build\GateWay.dir\Debug\NetConnection.obj
+D:\WebServer\common\body\NetServer.cpp;D:\WebServer\RPCGateway\build\GateWay.dir\Debug\NetServer.obj
+D:\WebServer\RPCGateway\source\body\NetHttpServer.cpp;D:\WebServer\RPCGateway\build\GateWay.dir\Debug\NetHttpServer.obj
+D:\WebServer\RPCGateway\source\body\RPCGateWayWork.cpp;D:\WebServer\RPCGateway\build\GateWay.dir\Debug\RPCGateWayWork.obj
+D:\WebServer\RPCGateway\source\body\NetClient.cpp;D:\WebServer\RPCGateway\build\GateWay.dir\Debug\NetClient.obj
