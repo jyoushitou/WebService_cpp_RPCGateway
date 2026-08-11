@@ -1,0 +1,23 @@
+# C++ 构建产物
+build/
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.lib
+*.dll
+*.o
+*.a
+*.so
+*.dylib
+
+# IDE 配置
+.vscode/
+.idea/
+*.user
+*.suo
+CMakeLists.txt.user
+
+# 日志
+*.log
+```

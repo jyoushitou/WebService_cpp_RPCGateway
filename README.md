@@ -1,65 +1,72 @@
-# RPCGateway — C++ WebSocket JSON-RPC 网关
+# RPCGateway — C++ Protobuf 微服务网关
 
-> WebServer 微服务架构的**前置网关**，负责统一协议转换、请求路由和业务分发。
+> WebServer 微服务架构的**前置网关**，负责 Vue 前端请求的协议转换、proto 序列化转发与响应解码。
 
 ![C++](https://img.shields.io/badge/C++-17-%2300599C?style=flat-square&logo=c%2B%2B)
 ![Boost](https://img.shields.io/badge/Boost-Beast/Asio-%23F6822B?style=flat-square&logo=boost)
-![JSON-RPC](https://img.shields.io/badge/JSON--RPC-2.0-%23000000?style=flat-square)
-![WebSocket](https://img.shields.io/badge/WebSocket-1.0-%234285F4?style=flat-square)
+![Protobuf](https://img.shields.io/badge/Protobuf-3.x-%23FF6A00?style=flat-square&logo=google)
+![HTTP](https://img.shields.io/badge/HTTP-JSON-%234285F4?style=flat-square)
 
 ---
 
 ## 📖 概述
 
-RPCGateway 是 WebServer 微服务架构的**统一网络入口**。它基于 Boost.Beast + Boost.Asio 实现 WebSocket 服务端，使用 **JSON-RPC 2.0** 协议替代传统的 HTTP REST API，实现前后端的高效 RPC 通信。
+RPCGateway 是 WebServer 微服务架构的**统一网络入口**。它作为前端（Vue3）与后端微服务之间的**协议转换网关**：
 
-> **原名**：原单体架构中的 `cpp_WebServer`，在微服务架构演进中剥离为独立网关服务。
+前端通过 HTTP 发送 **JSON** 请求 → 网关将请求数据 **编码为 Protobuf** → 转发给对应的微服务 → 微服务返回 Protobuf 响应 → 网关 **解码回 JSON** → 返回给前端。
+
+> **核心职责**：JSON ↔ Protobuf 的双向协议转换 + 请求路由 + 响应关联。
 
 ---
 
 ## ✨ 功能特性
 
-- 🔌 **WebSocket 长连接** — 基于 Boost.Beast，支持全双工通信
-- 📦 **JSON-RPC 2.0 协议** — 标准化 RPC 调用格式
-- 🔐 **Token 认证与会话管理** — 完整的用户鉴权体系
-- 🧵 **用户专属线程模型** — 每个登录用户拥有独立业务线程
-- 📋 **异步任务系统** — 任务投递、查询、结果回调
-- 🗄️ **MySQL 数据库操作** — 集成连接池，支持用户 CRUD
-- 👥 **多设备登录管理** — 同一账号可在多设备登录，支持设备列表查看/下线
+- 🌐 **HTTP 前端接入** — 接收 Vue3 前端 JSON 请求（端口 8080）
+- 🔄 **JSON → Protobuf 编码** — 将前端 JSON 请求序列化为 protobuf 消息
+- 🔄 **Protobuf → JSON 解码** — 将微服务 protobuf 响应反序列化为 JSON
+- 📮 **TCP 长连接转发** — 基于 Boost.Asio 与微服务保持 TCP 长连接
+- 🎫 **消息关联（msg_id）** — 通过自增 msg_id 关联请求与响应，实现异步转发
+- 🔌 **多微服务路由** — 根据请求路径（path）路由到不同微服务
+- 🛡️ **断线重连** — 微服务断开后自动 2 秒重连
+- 🧵 **每连接独立 IO 线程** — 每个微服务连接独立 io_context + 线程
 
 ---
 
 ## 🏗️ 架构设计
 
 ```
-┌──────────────┐     WebSocket      ┌──────────────────────────────┐
-│   Vue 前端    │ ◄───────────────► │      RPCGateway              │
-│  (gRPC-Web)   │   JSON-RPC 2.0    │                              │
-└──────────────┘                    │  ┌─ RPCServer ─────────────┐ │
-                                    │  │  • WebSocket 服务端      │ │
-                                    │  │  • JSON-RPC 协议解析     │ │
-                                    │  │  • 方法路由分发           │ │
-                                    │  └──────────────────────────┘ │
-                                    │                              │
-                                    │  ┌─ 用户线程模型 ──────────┐ │
-                                    │  │  • 每个用户一个线程       │ │
-                                    │  │  • 独立任务队列           │ │
-                                    │  │  • 独立 MySQL 连接        │ │
-                                    │  └──────────────────────────┘ │
-                                    │                              │
-                                    │  ┌─ 认证系统 ──────────────┐ │
-                                    │  │  • Token 生成/验证        │ │
-                                    │  │  • 会话管理               │ │
-                                    │  │  • 设备管理               │ │
-                                    │  └──────────────────────────┘ │
-                                    └──────────────────────────────┘
-                                               │
-                                        MySQL  │  连接池
-                                               ▼
-                                    ┌──────────────────────┐
-                                    │      MySQL 数据库     │
-                                    │    (web_server)       │
-                                    └──────────────────────┘
+┌──────────────┐   HTTP/JSON    ┌──────────────────────────────────────┐   TCP/Protobuf   ┌─────────────┐
+│   Vue 前端    │ ◄────────────► │            RPCGateway               │ ◄───────────────► │  微服务服务    │
+│   (Vue3)     │    :8080       │                                      │    :60000        │  (MySQL等)   │
+└──────────────┘                │  ┌──────────────────────────────┐   │                   └─────────────┘
+                                │  │   HttpServer :8080           │   │
+                                │  │  • 接收 Vue JSON 请求         │   │
+                                │  │  • 解析 JSON                  │   │
+                                │  └──────────────┬───────────────┘   │
+                                │                 │ cmd_str + session │
+                                │                 ▼                   │
+                                │  ┌──────────────────────────────┐   │
+                                │  │   业务路由层 HandleVueBiz     │   │
+                                │  │  • 分配 msg_id               │   │
+                                │  │  • 查询 g_conns 可用连接      │   │
+                                │  │  • 记录 PendingRequest       │   │
+                                │  └──────────────┬───────────────┘   │
+                                │                 │ proto 序列化     │
+                                │                 ▼                   │
+                                │  ┌──────────────────────────────┐   │
+                                │  │   NetClient TCP 客户端        │   │
+                                │  │  • 连接微服务 :60000          │   │
+                                │  │  • 编码 proto 发送            │   │
+                                │  └──────────────┬───────────────┘   │
+                                └─────────────────┼────────────────────┘
+                                                  │ proto 响应
+                                                  ▼
+                                ┌──────────────────────────────┐
+                                │       ClientWork 回调         │
+                                │  • proto 解码为 JSON          │
+                                │  • 查 msg_id → session        │
+                                │  • AsyncSendResponse 回前端   │
+                                └──────────────────────────────┘
 ```
 
 ---
@@ -68,17 +75,20 @@ RPCGateway 是 WebServer 微服务架构的**统一网络入口**。它基于 Bo
 
 ```
 RPCGateway/
-├── source/                        # 源代码
-│   ├── main.cpp                   # 程序入口：初始化 MySQL，启动 RPC
-│   ├── ServerInit.h               # 全局变量声明、初始化函数
-│   ├── RPCServer.h                # RPC 服务端类声明
-│   ├── RPCServer.cpp              # RPC 服务端实现（WebSocket + JSON-RPC）
-│   ├── Utils.h                    # 工具函数头文件（日志、JSON解析、Token认证）
-│   ├── Utils.cpp                  # 工具函数实现
-│   ├── Task.h                     # 任务系统头文件
-│   ├── Task.cpp                   # 任务系统实现
-│   ├── UserThread.h               # 用户线程管理头文件
-│   └── UserThread.cpp             # 用户线程管理实现
+├── source/                        # 源代码目录
+│   ├── main.cpp                   # 程序入口：初始化事件/信号/连接，启动 HTTP 服务
+│   ├── CMakeLists.txt             # CMake 构建脚本（自动查找 vcpkg）
+│   ├── include/                   # 头文件目录
+│   │   ├── RPCGateWayWork.h       # 网关核心：连接管理/消息路由/回调注册
+│   │   ├── NetClient.h            # TCP 客户端封装（转发 proto 到微服务）
+│   │   ├── NetHttpServer.h        # HTTP 服务端封装（接收 Vue 请求）
+│   │   └── Utils.h                # 工具函数（日志等）
+│   └── body/                      # 实现文件目录
+│       ├── RPCGateWayWork.cpp     # 网关业务：路由/编码/回包/重连
+│       ├── NetClient.cpp          # TCP 客户端实现
+│       ├── NetHttpServer.cpp      # HTTP 服务端实现
+│       └── Utils.cpp              # 工具函数实现
+├── .gitignore                     # Git 忽略规则
 ├── LICENSE                        # MIT 许可证
 └── README.md                      # 本文件
 ```
@@ -89,12 +99,12 @@ RPCGateway/
 
 ### 前置依赖
 
-| 组件 | 版本要求 | 说明 |
-|------|----------|------|
-| C++ 编译器 | C++17 (GCC 8+ / MSVC 2019+) | |
-| CMake | 3.10+ | 构建系统 |
-| Boost | 1.70+ | 需要 Beast、Asio、System、JSON |
-| MySQL | 8.0+ | 数据库 + C API 开发库 |
+| 组件       | 版本要求                    | 说明                           |
+| ---------- | --------------------------- | ------------------------------ |
+| C++ 编译器 | C++17 (GCC 8+ / MSVC 2019+) |                                |
+| CMake      | 3.10+                       | 构建系统                       |
+| Boost      | 1.70+                       | 需要 Beast、Asio、System、JSON |
+| Protobuf   | 3.x+                        | 协议序列化                     |
 
 ### 构建与运行
 
@@ -104,104 +114,95 @@ git clone https://github.com/jyoushitou/WebService_cpp_RPCGateway.git
 cd RPCGateway
 
 # 构建
+cd source
 mkdir build && cd build
 cmake ..
 cmake --build .
 
 # 运行（默认端口 60906）
-./RPCGateway
+./GateWay.exe
 ```
 
 ---
 
-## 🔌 RPC 接口文档
+## 🔌 请求流转流程
 
-
-RPCGateway 使用 **JSON-RPC 2.0** 协议，通过 WebSocket 通信。
-
-### JSON-RPC 请求格式
+### 1. Vue 前端 → 网关（HTTP JSON）
 
 ```json
 {
-  "jsonrpc": "2.0",
-  "method": "方法名",
-  "params": { ... },
-  "id": 1
+  "cmd": "GetUser",
+  "params": { "uid": 10001 }
 }
 ```
 
-### 用户认证
+### 2. 网关 → 微服务（Protobuf）
 
-| 方法 | 参数 | 说明 |
-|------|------|------|
-| `user.login` | name, password, device_name(可选), client_ip(可选), user_agent(可选) | 用户登录 |
-| `user.register` | name, password | 用户注册 |
-| `user.info` | token | 获取当前用户信息 |
-| `user.logout` | token | 退出登录 |
+网关将 JSON 序列化为对应 proto 消息，通过 TCP 长连接发送：
 
-### 设备管理
+```protobuf
+// proto 定义（示例）
+message UserRequest {
+  header head = 1;      // 消息头
+  uint32 UID = 2;       // 用户 ID
+}
+```
 
-| 方法 | 参数 | 说明 |
-|------|------|------|
-| `device.list` | token | 获取该用户所有已登录设备 |
+### 3. 微服务 → 网关（Protobuf 响应）
 
-### 任务系统
+微服务处理完后返回 protobuf 结果。
 
-| 方法 | 参数 | 说明 |
-|------|------|------|
-| `task.submit` | token, ... | 提交数据处理任务 |
-| `task.update` | token, ... | 提交数据更新任务 |
-| `task.delete` | token, ... | 提交删除任务 |
-| `task.result` | token, task_id | 查询异步任务执行结果 |
+### 4. 网关 → Vue 前端（JSON 响应）
 
-### 系统
+网关将 protobuf 响应解码为 JSON 返回：
 
-| 方法 | 参数 | 说明 |
-|------|------|------|
-| `system.ping` | (无) | 心跳检测 |
+```json
+{ "code": 0, "data": { "uid": 10001, "name": "张三" } }
+```
 
 ---
 
-## 🧵 用户线程模型
+## 🧵 线程模型
 
-本网关实现了独特的**用户专属线程模型**：
-
-1. 用户登录成功后，自动创建一个**独立工作线程**
-2. 该线程拥有自己的 **MySQL 数据库连接**
-3. 该线程拥有独立的**任务队列**，通过条件变量等待任务
-4. 客户端通过 `task.submit` 等方法**投递任务到线程队列**
-5. 线程处理完成后，通过 `task.result` **查询执行结果**
-6. 用户退出登录后，线程自动**安全关闭**
-
-### 任务类型
-
-| 类型 | 说明 |
-|------|------|
-| `PING` | 心跳检测，返回 ping/pong 响应 |
-| `PROCESS_DATA` | 数据处理任务 |
-| `SEND_NOTIFICATION` | 发送通知任务 |
-| `SYNC_DATABASE` | 数据库同步任务 |
-| `CUSTOM_EVENT` | 自定义事件任务 |
-| `SHUTDOWN` | 关闭/停止任务 |
-
----
-
-## 🔐 Token 认证机制
-
-- 登录成功生成 **32 位随机十六进制 Token**
-- Token 与**会话信息**（用户 ID、权限、设备信息）绑定存储
-- 支持**多设备**同一账号同时登录，每个设备独立 Token
-- 退出登录时仅销毁当前 Token，不影响其他设备
+```
+┌─────────────────────────────────────────────────────┐
+│                    主线程 (main)                     │
+│  • 创建退出事件                                      │
+│  • 注册 Ctrl+C 信号处理                              │
+│  • 调用 RunHttpServer（阻塞直到退出）                │
+└────────────────────────┬────────────────────────────┘
+                         │
+        ┌────────────────┼─────────────────┐
+        ▼                ▼                 ▼
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│ HTTP IO 线程  │  │ 客户端 IO 线程 │  │ 重连线程(临时) │
+│ :8080 监听    │  │ :60000 转发   │  │ 断开后 2s 重连 │
+│ 处理 Vue 请求 │  │ 收发 proto    │  │              │
+└──────────────┘  └──────────────┘  └──────────────┘
+```
 
 ---
 
 ## 📋 开发计划
 
-- [ ] **gRPC 协议迁移** — 从 JSON-RPC（WebSocket）迁移到标准 gRPC
-- [ ] **连接池优化** — 集成 MySQL 独立连接池微服务
-- [ ] **服务发现集成** — 对接 ServiceRegistry 实现动态路由
-- [ ] **限流控制** — 添加 Rate Limiter 保护后端
-- [ ] **链路追踪** — 集成 OpenTelemetry 标准
+### ⏳ 进行中 / TODO
+
+- [ ] **Proto 序列化实现** — 实现 JSON ↔ Protobuf 编解码（基于 proto/source 中已定义的 `.proto` 文件）
+  - [ ] `Common.proto` — 消息头（MSGID/MSGLen）与通用结构
+  - [ ] `MySQL.proto` — MySQL 服务请求消息
+  - [ ] `select.proto` — MySQL 查询请求消息
+  - [ ] `User.proto` — 用户微服务消息
+- [ ] **链路追踪** — 根据 msg_id 记录完整的请求链路（网关 → 微服务 → 返回），支持日志分析和问题定位
+- [ ] **多微服务路由** — 根据 path/cmd 动态路由到不同微服务实例
+
+### ✅ 已完成
+
+- [x] HTTP 服务端（端口 8080）接收 Vue JSON 请求
+- [x] TCP 客户端长连接（端口 60000）转发微服务
+- [x] msg_id 消息关联（请求响应异步匹配）
+- [x] 断线自动重连（2 秒间隔）
+- [x] 每连接独立 io_context + 线程模型
+- [x] 优雅退出（等待 IO 线程确定性结束）
 
 ---
 
