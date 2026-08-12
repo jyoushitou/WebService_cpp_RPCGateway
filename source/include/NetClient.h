@@ -16,10 +16,10 @@ namespace Net
         {
         public:
             // 构造函数
-            Client(boost::asio::io_context&, int);
+            Client::Client(boost::asio::io_context& io, int serviceID);
 
             // 连接函数
-            void Connect(const std::string&, const std::string&);
+            void Connect(const std::string& host, const std::string& port);
 
             // 启动
             void Start() override;
@@ -35,7 +35,7 @@ namespace Net
 
         protected:
             // IO抛出收到的数据
-            void ToWork(unsigned long long, std::string) override;
+            void ToWork(unsigned long long msg_id, std::string msg) override;
 
             // 回调关闭
             void ToClosed() override;

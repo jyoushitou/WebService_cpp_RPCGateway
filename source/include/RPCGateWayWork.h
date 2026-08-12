@@ -120,10 +120,10 @@ inline BOOL WINAPI ConsoleCtrlHandler(DWORD dwCtrlType)
 }
 
 // 工作函数
-void ClientWork(size_t, int, unsigned long long, const std::string&);
+void ClientWork(size_t idx, int serviceID, unsigned long long msg_id, const std::string& msg);
 
 // 关闭函数
-void Close(size_t, int);
+void Close(size_t idx, int serviceID);
 
 // 启动客户端
-void CreateConnection(size_t, int, const std::string&, const std::string&);
+void CreateConnection(size_t idx, int serviceID, const std::string& host, const std::string& port);
