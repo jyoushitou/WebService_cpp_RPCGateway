@@ -55,11 +55,11 @@ find_package(Boost COMPONENTS json REQUIRED)
 
 add_executable(${PROJECT_NAME}
     main.cpp
-    ../../common/body/Common.pb.cc
-    ../../common/body/Utils.cpp
-    ../../common/body/ThreadPool.cpp
-    ../../common/body/NetConnection.cpp
-    ../../common/body/NetServer.cpp
+    ../../common/cpp/body/Common.pb.cc
+    ../../common/cpp/body/Utils.cpp
+    ../../common/cpp/body/ThreadPool.cpp
+    ../../common/cpp/body/NetConnection.cpp
+    ../../common/cpp/body/NetServer.cpp
     body/NetHttpServer.cpp
     body/RPCGateWayWork.cpp
     body/NetClient.cpp
@@ -72,12 +72,12 @@ add_executable(${PROJECT_NAME}
 # 在构建目录下创建 include/common，存放生成的头文件副本
 # ============================================================
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/include/common")
-file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/../../common/include/Common.pb.h"
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/../../common/cpp/include/Common.pb.h"
     DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/include/common/")
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../common/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../common/cpp/include
     ${CMAKE_CURRENT_BINARY_DIR}/include
 )
 

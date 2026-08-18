@@ -47,7 +47,14 @@ int main()
     // 注意：Close() 回调（IO 线程内）已经将 io_thread detach 并置空缺省槽位，
     // 因此这里不能也不应再 join（join 已 detach 的线程会抛 system_error）。
     // 给 IO 线程一点时间完成关闭，随后进程退出时 OS 会清理剩余资源。
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        bool all_closed = std::all_of(g_conns.begin(), g_conns.end(), [](auto& c) { return !c || !c->client; });
+        if (all_closed)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
 
     // 清理
     CloseHandle(g_exit_event);

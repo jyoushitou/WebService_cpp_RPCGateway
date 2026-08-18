@@ -99,7 +99,11 @@ inline BOOL WINAPI ConsoleCtrlHandler(DWORD dwCtrlType)
 {
     switch (dwCtrlType)
     {
-    case CTRL_C_EVENT:     // Ctrl+C
+    case CTRL_C_EVENT: // Ctrl+C
+    {
+        SetEvent(g_exit_event);
+        return TRUE;
+    }
     case CTRL_BREAK_EVENT: // Ctrl+Break
     case CTRL_CLOSE_EVENT: // 用户点关闭窗口
     case CTRL_LOGOFF_EVENT:
