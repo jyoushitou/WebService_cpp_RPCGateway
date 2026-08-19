@@ -44,35 +44,25 @@ struct PendingRequest
 
 //===客户端参数===
 
-// 微服务ID
-constexpr int ServiceID_RPCGateWay = 1;
 // 连接数
 constexpr int ServiceNum = 1;
 
 // 加锁变量
-inline std::mutex g_conns_mutex;
+inline std::mutex conns_mutex;
 // 储存18 条连接
-inline std::vector<std::shared_ptr<ConnItem>> g_conns;
-// 运行标志（回调线程只碰这个）
-inline std::atomic<bool> g_running{true};
+inline std::vector<std::shared_ptr<ConnItem>> conns;
 // 总连接数（CreateConnection 中递增）
-inline std::atomic<size_t> g_total_conns{0};
+inline std::atomic<size_t> total_conns{0};
 // 已关闭连接数（OnClose 中递增）
-inline std::atomic<size_t> g_closed_conns{0};
-// 退出事件（主线程等待它）
-inline HANDLE g_exit_event = nullptr;
+inline std::atomic<size_t> closed_conns{0};
 
 //===服务器参数===
 
 // 全局服务器指针，供信号处理函数使用
-inline std::shared_ptr<Net::Server::Server> g_server;
+inline std::shared_ptr<Net::Server::Server> server_ptr;
 
 // HTTP 服务器专用 io_context（堆分配，避免 RunHttpServer 返回后局部 io 析构导致悬垂引用）
-inline std::unique_ptr<boost::asio::io_context> g_http_io;
-// 退出标志
-inline std::atomic<bool> g_exit_flag{false};
-// 防止 Stop() 被多次调用的标志
-inline std::atomic<bool> g_stop_called{false};
+inline std::unique_ptr<boost::asio::io_context> http_io_ptr;
 
 // msg_id → PendingRequest 映射
 inline std::mutex g_pending_mutex;
@@ -80,14 +70,8 @@ inline std::unordered_map<unsigned long long, PendingRequest> g_pending;
 
 //===服务器函数===
 
-// 统一优雅退出逻辑（保证只执行一次）
-void GracefulShutdown();
-
-// Ctrl+C / SIGTERM 处理函数
-void OnSignal(int);
-
 // HTTP服务器启动函数
-void RunHttpServer(int tcp_port, unsigned short http_port, int ServiceID_);
+void RunHttpServer(int tcp_port, unsigned short http_port);
 
 // 转发函数
 std::string HandleVueBiz(std::shared_ptr<Net::Server::HttpServer::HttpSession> session, const std::string& path,
@@ -95,39 +79,12 @@ std::string HandleVueBiz(std::shared_ptr<Net::Server::HttpServer::HttpSession> s
 
 //===客户端函数===
 // 客户端的
-inline BOOL WINAPI ConsoleCtrlHandler(DWORD dwCtrlType)
-{
-    switch (dwCtrlType)
-    {
-    case CTRL_C_EVENT: // Ctrl+C
-    {
-        SetEvent(g_exit_event);
-        return TRUE;
-    }
-    case CTRL_BREAK_EVENT: // Ctrl+Break
-    case CTRL_CLOSE_EVENT: // 用户点关闭窗口
-    case CTRL_LOGOFF_EVENT:
-    case CTRL_SHUTDOWN_EVENT: // 系统关机
-    {
-        // 在 Windows 专用回调线程中执行：
-        // ⚠️ 只允许做这两件事，绝不打印日志、绝不调 Stop()（会内部 post，有线程安全问题风险）
-        g_running = false;
-        // 唤醒主线程
-        g_exit_flag = true;
-
-        SetEvent(g_exit_event);
-        return TRUE;
-    }
-    default:
-        return FALSE; // 其他信号交给系统默认
-    }
-}
 
 // 工作函数
-void ClientWork(size_t idx, int serviceID, unsigned long long msg_id, const std::string& msg);
+void ClientWork(size_t idx, unsigned long long msg_id, const std::string& msg);
 
 // 关闭函数
-void Close(size_t idx, int serviceID);
+void Close(size_t idx);
 
 // 启动客户端
-void CreateConnection(size_t idx, int serviceID, const std::string& host, const std::string& port);
+void CreateConnection(size_t idx, const std::string& host, const std::string& port);

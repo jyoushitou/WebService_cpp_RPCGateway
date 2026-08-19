@@ -15,9 +15,9 @@ namespace Net
                 return std::static_pointer_cast<HttpSession>(Session::shared_from_this());
             }
 
-            HttpSession::HttpSession(boost::asio::io_context& io, boost::asio::ip::tcp::socket sock, int serviceID_,
+            HttpSession::HttpSession(boost::asio::io_context& io, boost::asio::ip::tcp::socket sock,
                                      HttpServer* http_server_)
-                : Net::Server::Session(io, std::move(sock), serviceID_, http_server_), http_server(http_server_),
+                : Net::Server::Session(io, std::move(sock), http_server_), http_server(http_server_),
                   parser_(boost::beast::http::request_parser<boost::beast::http::string_body>{})
             {
             }
@@ -32,7 +32,7 @@ namespace Net
                         // 检查读是否有错误
                         if (ec)
                         {
-                            Utils::Out_Msg("收到的消息的等待有错误，错误码：" + ec.what(), self->serviceID);
+                            Utils::Out::Out_Msg("收到的消息的等待有错误，错误码：" + ec.what());
                             self->ActuallyClose();
                             return;
                         }
@@ -69,7 +69,7 @@ namespace Net
                         // 检查读是否有错误
                         if (ec)
                         {
-                            Utils::Out_Msg("读取消息有错误，错误码：" + ec.what(), self->serviceID);
+                            Utils::Out::Out_Msg("读取消息有错误，错误码：" + ec.what());
                             // 出现错误，关闭连接
                             self->ActuallyClose();
                             return;
@@ -133,8 +133,7 @@ namespace Net
                                                     // 判断是否有错误
                                                     if (ec)
                                                     {
-                                                        Utils::Out_Msg("发送消息有错误，错误码：" + ec.what(),
-                                                                       self->serviceID);
+                                                        Utils::Out::Out_Msg("发送消息有错误，错误码：" + ec.what());
                                                         ActuallyClose();
                                                         return;
                                                     }
@@ -153,9 +152,9 @@ namespace Net
             //========== HttpServer ==========
 
             // 构造函数
-            HttpServer::HttpServer(boost::asio::io_context& io, boost::asio::ip::tcp::endpoint ep, int serviceID_,
+            HttpServer::HttpServer(boost::asio::io_context& io, boost::asio::ip::tcp::endpoint ep,
                                    unsigned short http_port_)
-                : Net::Server::Server(io, ep, serviceID_), http_acceptor(io), http_port(http_port_)
+                : Net::Server::Server(io, ep), http_acceptor(io), http_port(http_port_)
             {
                 // 初始化 HTTP acceptor
 
@@ -187,18 +186,18 @@ namespace Net
                                                // 是否已经在运行状态
                                                if (!running)
                                                {
-                                                   Utils::Out_Msg("已经有连接的Session", serviceID);
+                                                   Utils::Out::Out_Msg("已经有连接的Session");
                                                    return;
                                                }
 
                                                if (!ec)
                                                {
 
-                                                   Utils::Out_Msg("开始创建连接", serviceID);
+                                                   Utils::Out::Out_Msg("开始创建连接");
 
                                                    // 创建 HTTP 会话
-                                                   auto session = std::make_shared<HttpSession>(ioc, std::move(*sock),
-                                                                                                serviceID, this);
+                                                   auto session =
+                                                       std::make_shared<HttpSession>(ioc, std::move(*sock), this);
 
                                                    // 放入Session队列
                                                    http_sessions.push_back(session);
@@ -211,7 +210,7 @@ namespace Net
                                                }
                                                else
                                                {
-                                                   Utils::Out_Err("HTTP accept 错误: " + ec.what(), serviceID);
+                                                   Utils::Out::Out_Err("HTTP accept 错误: " + ec.what());
                                                }
                                            });
             }

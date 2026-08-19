@@ -16,7 +16,7 @@ namespace Net
         {
         public:
             // 构造函数
-            Client::Client(boost::asio::io_context& io, int serviceID);
+            Client::Client(boost::asio::io_context& io);
 
             // 连接函数
             void Connect(const std::string& host, const std::string& port);

@@ -11,15 +11,15 @@ namespace Net
             // 发出连接请求
             ToSend("客户端发出连接，是否收到");
 
-            Utils::Out_Msg("客户端发出连接测试请求", serviceID);
+            Utils::Out::Out_Msg("客户端发出连接测试请求");
 
             // 等待回复
             Connection::Start();
         }
 
         // 构造函数
-        Client::Client(boost::asio::io_context& io, int serviceID)
-            : Connection(boost::asio::ip::tcp::socket(io), serviceID), ioc(io), resolver(io)
+        Client::Client(boost::asio::io_context& io)
+            : Connection(boost::asio::ip::tcp::socket(io)), ioc(io), resolver(io)
         {
         }
 
@@ -37,7 +37,7 @@ namespace Net
                                        // 如果有错误
                                        if (ec)
                                        {
-                                           Utils::Out_Err("解析地址失败: " + ec.what(), serviceID);
+                                           Utils::Out::Out_Err("解析地址失败: " + ec.what());
                                            // 通知主线程退出，防止 WaitForMessage 永久阻塞
                                            Close();
                                            return;
@@ -51,12 +51,12 @@ namespace Net
                                            {
                                                if (ec_conect)
                                                {
-                                                   Utils::Out_Err("连接失败: " + ec_conect.what(), serviceID);
+                                                   Utils::Out::Out_Err("连接失败: " + ec_conect.what());
                                                    Close();
                                                    return;
                                                }
 
-                                               Utils::Out_Msg(host + "连接成功", serviceID);
+                                               Utils::Out::Out_Msg(host + "连接成功");
                                                Start();
                                            });
                                    });

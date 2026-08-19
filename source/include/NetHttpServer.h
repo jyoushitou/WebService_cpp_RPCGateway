@@ -27,8 +27,7 @@ namespace Net
             {
             public:
                 // 构造函数（额外传入 http_port 用于 Vue 前端）
-                HttpServer(boost::asio::io_context& io, boost::asio::ip::tcp::endpoint ep, int serviceID_,
-                           unsigned short http_port_);
+                HttpServer(boost::asio::io_context& io, boost::asio::ip::tcp::endpoint ep, unsigned short http_port_);
 
                 // 开始接受 HTTP 连接
                 void StartHttpAccept();
@@ -64,8 +63,7 @@ namespace Net
             class HttpSession : public Session
             {
             public:
-                HttpSession(boost::asio::io_context& io, boost::asio::ip::tcp::socket sock, int serviceID_,
-                            HttpServer* http_server);
+                HttpSession(boost::asio::io_context& io, boost::asio::ip::tcp::socket sock, HttpServer* http_server);
 
                 // 安全获取自身 shared_ptr（重载返回 HttpSession 类型，避免 protected 访问问题）
                 std::shared_ptr<HttpSession> shared_from_this();
