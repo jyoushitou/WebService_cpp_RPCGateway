@@ -18,55 +18,41 @@ void RunHttpServer(int tcp_port, unsigned short http_port)
             if (server_ptr)
                 server_ptr->Stop();
 
-            // 清空 pending 表（避免后续客户端回包指向已关闭的 HttpSession）
+            // 清空 pending 表
             {
                 std::lock_guard<std::mutex> lock(g_pending_mutex);
                 g_pending.clear();
             }
 
-            // 1.3 保存所有连接副本并停止所有后端客户端连接
-            std::vector<std::shared_ptr<ConnItem>> active_conns;
+            // 取出唯一内网连接并停止（g_conn_mutex 单独加锁，不嵌套）
+            std::shared_ptr<ConnItem> old_conn;
             {
-                std::lock_guard<std::mutex> lock(conns_mutex);
-                for (auto& conn : conns)
+                std::lock_guard<std::mutex> lock(conn_mutex);
+                old_conn = std::move(conn);
+                if (old_conn && old_conn->io && old_conn->client)
                 {
-                    if (conn && conn->client)
-                    {
-                        active_conns.push_back(conn);
-                        conn->client->Stop();
-                    }
+                    auto client_io = old_conn->io.get();
+                    auto client = old_conn->client;
+                    boost::asio::post(*client_io, [client]() { client->Stop(); });
                 }
             }
 
-            // 确定性等待所有客户端 IO 线程结束
-            constexpr int max_wait_ms = 5000;
-            const auto wait_start = std::chrono::steady_clock::now();
-            while (true)
+            // 确定性等待该连接 IO 线程结束（最多 5 秒）
+            if (old_conn)
             {
-                bool all_done = true;
-                for (auto& conn : active_conns)
+                constexpr int max_wait_ms = 5000;
+                const auto wait_start = std::chrono::steady_clock::now();
+                while (!old_conn->io_finished.load(std::memory_order_acquire))
                 {
-                    if (!conn->io_finished.load(std::memory_order_acquire))
+                    if (std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - wait_start) > std::chrono::milliseconds(max_wait_ms))
                     {
-                        all_done = false;
+                        Utils::Out::Out_Err("等待客户端 IO 线程结束超时，继续退出流程");
                         break;
                     }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 }
-                if (all_done)
-                    break;
-                if (std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now() - wait_start) > std::chrono::milliseconds(max_wait_ms))
-                {
-                    Utils::Out::Out_Err("等待客户端 IO 线程结束超时，继续退出流程");
-                    break;
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
-
-            // 注意：不要在停止回调中 reset server_ptr / http_io_ptr！
-            // io_thread 可能仍在 http_io->run() 中执行，
-            // 提前析构 io_context 会导致 use-after-free → abort。
-            // 资源释放统一放在 RunHttpServer 中 join 完 io_thread 之后。
         });
 
     // 注册信号处理
@@ -118,7 +104,7 @@ std::string HandleVueBiz(std::shared_ptr<Net::Server::HttpServer::HttpSession> s
 {
     Utils::Out::Out_Msg("[业务层] 收到命令: " + cmd_str + ", path=" + path);
 
-    // 3. 分配 msg_id + 记录回包会话
+    // 分配 msg_id + 记录回包会话
     unsigned long long msg_id = Net::g_net_msg_id.fetch_add(1);
     {
         std::lock_guard<std::mutex> lock(g_pending_mutex);
@@ -127,18 +113,20 @@ std::string HandleVueBiz(std::shared_ptr<Net::Server::HttpServer::HttpSession> s
 
     std::shared_ptr<Net::Client::Client> client;
     {
-        std::lock_guard<std::mutex> lock(conns_mutex);
-        if (conns.empty() || !conns[0] || !conns[0]->client)
-        {
-            // 没有后端连接：立即清理刚插入的 pending 条目，避免泄漏
-            std::lock_guard<std::mutex> lock2(g_pending_mutex);
-            g_pending.erase(msg_id);
-            return "{\"code\":500,\"msg\":\"no backend connection\"}";
-        }
-        client = conns[0]->client;
+        std::lock_guard<std::mutex> lock(conn_mutex);
+        if (conn && conn->client)
+            client = conn->client;
     }
 
-    // 4. 直接把字符串发给目标连接（微服务端收到这个字符串后自行处理）
+    // 没有后端连接：单独锁 g_pending_mutex 删条目，返回错误
+    if (!client)
+    {
+        std::lock_guard<std::mutex> lock(g_pending_mutex);
+        g_pending.erase(msg_id);
+        return "{\"code\":500,\"msg\":\"no backend connection\"}";
+    }
+
+    // 直接把字符串发给目标连接（微服务端收到这个字符串后自行处理）
     client->ToSend(msg_id, cmd_str);
 
     // 不在此处返回响应，由 ClientWork 收到微服务结果后通过 session->AsyncSendResponse(msg) 异步返回
@@ -148,7 +136,7 @@ std::string HandleVueBiz(std::shared_ptr<Net::Server::HttpServer::HttpSession> s
 //===客户端===
 
 // 工作函数
-void ClientWork(size_t idx, unsigned long long msg_id, const std::string& msg)
+void ClientWork(unsigned long long msg_id, const std::string& msg)
 {
     // 查表：这个 msg_id 是不是有 HTTP 会话在等
     std::shared_ptr<Net::Server::HttpServer::HttpSession> session;
@@ -171,86 +159,92 @@ void ClientWork(size_t idx, unsigned long long msg_id, const std::string& msg)
     else
     {
         // 没有对应HTTP请求，就是微服务主动推送，按原样打印
-        Utils::Out::Out_Net_Msg(msg_id, "线程" + std::to_string(idx) + "收到消息: " + msg);
+        Utils::Out::Out_Net_Msg(msg_id, "收到微服务主动推送: " + msg);
     }
 }
 
 // 关闭函数
-void Close(size_t idx)
+void Close()
 {
-    Utils::Out::Out_Msg("正在关闭:" + std::to_string(static_cast<int>(10 + idx)) + "线程");
+    Utils::Out::Out_Msg("内网连接断开");
 
-    // 从 conns 中移除对应槽位（后续 CreateConnection 会复用该位置）
-    {
-        std::lock_guard<std::mutex> lock(conns_mutex);
-        if (idx < conns.size() && conns[idx])
-        {
-            // 关键修复：本回调正运行在 conns[idx]->io_thread 上（IO 线程）。
-            // 若直接置空，ConnItem 析构时销毁 joinable 的 std::thread → std::terminate → abort()
-            // 因此必须先 detach，让线程自然退出
-            if (conns[idx]->io_thread.joinable())
-                conns[idx]->io_thread.detach();
-            conns[idx] = nullptr;
-        }
-    }
-
-    // 仅当主动退出时才唤醒主线程（g_exit_flag 由 GracefulShutdown / Ctrl+C 设置）
-    if (Utils::Exit::exit_flag.load())
-    {
+    // 防止关断回调重入
+    if (conn_closed.exchange(true))
         return;
-    }
 
-    // 意外断开：不退出，保持 HTTP 服务继续运行，并尝试重连
-    Utils::Out::Out_Msg("连接断开，2 秒后尝试重连...");
+    if (Utils::Exit::exit_flag.load())
+        return;
+
+    Utils::Out::Out_Msg("2 秒后尝试重连...");
     std::thread(
-        [idx]()
+        []()
         {
             std::this_thread::sleep_for(std::chrono::seconds(2));
-            CreateConnection(idx, "127.0.0.1", "60000");
+
+            // 退出期间不再重连（防止创建新线程后无法 join → std::terminate → abort）
+            if (Utils::Exit::exit_flag.load())
+                return;
+
+            // 先安全收藏旧连接（不在此处直接 reset，等待 IO 线程退出）
+            std::shared_ptr<ConnItem> old_conn;
+            {
+                std::lock_guard<std::mutex> lock(conn_mutex);
+                old_conn = std::move(conn);
+                conn = nullptr;
+                conn_closed.store(false); // 允许下一次重连
+            }
+
+            // 等待旧 IO 线程结束（最多 3 秒），结束后再重建
+            if (old_conn)
+            {
+                if (old_conn->io && old_conn->client)
+                {
+                    auto client_io = old_conn->io.get();
+                    auto client = old_conn->client;
+                    boost::asio::post(*client_io, [client]() { client->Stop(); });
+                }
+                for (int i = 0; i < 30 && !old_conn->io_finished.load(); ++i)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            // old_conn 在此作用域结束后安全析构（IO 线程已退出）
+
+            CreateConnection("127.0.0.1", "60000");
         })
         .detach();
 }
 
-// 创建连接
-void CreateConnection(size_t idx, const std::string& host, const std::string& port)
+// 创建连接（单连接）
+void CreateConnection(const std::string& host, const std::string& port)
 {
-    Utils::Out::Out_Msg("正在连接");
-
-    // 线程数统计自增
-    total_conns.fetch_add(1);
+    Utils::Out::Out_Msg("正在连接内网服务: " + host + ":" + port);
 
     // 创建io_context的线程指针
-    auto conn = std::make_shared<ConnItem>();
+    auto new_conn = std::make_shared<ConnItem>();
 
     // 创建专属io_context
-    conn->io = std::make_unique<boost::asio::io_context>();
+    new_conn->io = std::make_unique<boost::asio::io_context>();
 
-    // 创建线程独立的客户端
-    conn->client = std::make_shared<Net::Client::Client>(*conn->io);
+    // 创建线程独立的客户端（使用 new_conn 自己的 io，不能用全局 conn）
+    new_conn->client = std::make_shared<Net::Client::Client>(*new_conn->io);
 
-    // 注册回调（捕获 idx，避免共享状态）
-    conn->client->SetMessageCallback([idx](unsigned long long id, std::string msg) { ClientWork(idx, id, msg); });
+    // 注册返回回调
+    new_conn->client->SetMessageCallback([](unsigned long long id, std::string msg) { ClientWork(id, msg); });
+    // 注册关闭回调
+    new_conn->client->SetCloseCallback([]() { Close(); });
 
-    // 设置关闭回调
-    conn->client->SetCloseCallback([idx]() { Close(idx); });
+    // 创建连接
+    new_conn->client->Connect(host, port);
 
-    // 异步连接，先发起连接保证 io_context 中有任务
-    conn->client->Connect(host, port);
-
-    // 每连接 1 个线程驱动自己的 io_context
-    conn->io_thread = std::thread(
-        [conn]
+    // 创建线程
+    new_conn->io_thread = std::thread(
+        [new_conn]
         {
-            conn->io->run(); // 阻塞直到该连接 Stop() 后 io_context 无任务
-            // run() 返回后说明该连接所有异步操作已结束，标记完成（供退出时确定性等待）
-            conn->io_finished.store(true, std::memory_order_release);
+            new_conn->io->run();
+            new_conn->io_finished.store(true, std::memory_order_release);
         });
 
-    // 将独立io_context加入数组（复用 idx 槽位，避免无限增长）
     {
-        std::lock_guard<std::mutex> lock(conns_mutex);
-        if (idx >= conns.size())
-            conns.resize(idx + 1);
-        conns[idx] = conn;
+        std::lock_guard<std::mutex> lock(conn_mutex);
+        conn = new_conn;
     }
 }

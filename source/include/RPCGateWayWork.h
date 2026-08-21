@@ -31,6 +31,16 @@ struct ConnItem
     std::thread io_thread;
     // io_thread.run() 返回后置为 true（表示该连接所有异步操作已结束，可安全释放关联资源）
     std::atomic<bool> io_finished{false};
+
+    // 确保线程被 join，防止 std::thread 析构时 std::terminate() → abort()
+    ~ConnItem()
+    {
+        if (io_thread.joinable())
+        {
+            // run() 已返回（io_finished=true）时 join 立即成功；否则阻塞等待
+            io_thread.join();
+        }
+    }
 };
 
 // 一条 HTTP 请求对应的上下文：记住是哪个会话在等回包
@@ -44,17 +54,11 @@ struct PendingRequest
 
 //===客户端参数===
 
-// 连接数
-constexpr int ServiceNum = 1;
-
-// 加锁变量
-inline std::mutex conns_mutex;
-// 储存18 条连接
-inline std::vector<std::shared_ptr<ConnItem>> conns;
-// 总连接数（CreateConnection 中递增）
-inline std::atomic<size_t> total_conns{0};
-// 已关闭连接数（OnClose 中递增）
-inline std::atomic<size_t> closed_conns{0};
+// 唯一内网连接
+inline std::mutex conn_mutex;
+inline std::shared_ptr<ConnItem> conn;
+// 标记连接断开
+inline std::atomic<bool> conn_closed(false);
 
 //===服务器参数===
 
@@ -81,10 +85,10 @@ std::string HandleVueBiz(std::shared_ptr<Net::Server::HttpServer::HttpSession> s
 // 客户端的
 
 // 工作函数
-void ClientWork(size_t idx, unsigned long long msg_id, const std::string& msg);
+void ClientWork(unsigned long long msg_id, const std::string& msg);
 
 // 关闭函数
-void Close(size_t idx);
+void Close();
 
 // 启动客户端
-void CreateConnection(size_t idx, const std::string& host, const std::string& port);
+void CreateConnection(const std::string& host, const std::string& port);

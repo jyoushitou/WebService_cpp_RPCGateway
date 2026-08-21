@@ -60,9 +60,9 @@ add_executable(${PROJECT_NAME}
     ../../common/cpp/body/ThreadPool.cpp
     ../../common/cpp/body/NetConnection.cpp
     ../../common/cpp/body/NetServer.cpp
+    ../../common/cpp/body/NetClient.cpp
     body/NetHttpServer.cpp
     body/RPCGateWayWork.cpp
-    body/NetClient.cpp
 )
 
 # Common.pb.cc 中 include 的是 "common/Common.pb.h"，需要 ../common
