@@ -208,7 +208,8 @@ void Close()
             }
             // old_conn 在此作用域结束后安全析构（IO 线程已退出）
 
-            CreateConnection("127.0.0.1", "60000");
+            // 复用首次连接时记录的后端地址，不写死
+            CreateConnection(g_backend_host, g_backend_port);
         })
         .detach();
 }
@@ -216,6 +217,10 @@ void Close()
 // 创建连接（单连接）
 void CreateConnection(const std::string& host, const std::string& port)
 {
+    // 记录后端地址，断线重连时复用（不写死）
+    g_backend_host = host;
+    g_backend_port = port;
+
     Utils::Out::Out_Msg("正在连接内网服务: " + host + ":" + port);
 
     // 创建io_context的线程指针

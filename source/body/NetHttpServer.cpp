@@ -250,25 +250,34 @@ namespace Net
             {
                 std::string cmd_str;
 
-                // 1. 尝试按 JSON 解析（为了兼容 {"cmd":"xxx"} 的格式）
-                try
+                // 0. body 为空（GET 请求等）：直接用 URL 路径作为命令
+                //    例如：GET /api/articles → cmd_str = "/api/articles"
+                if (body.empty())
                 {
-                    boost::json::value v = boost::json::parse(body);
-                    if (v.is_object() && v.as_object().contains("cmd") && v.as_object()["cmd"].is_string())
-                    {
-                        // 前端发的是 {"cmd":"GetUser"} → 提取 "GetUser"
-                        cmd_str = v.as_object()["cmd"].as_string().c_str();
-                    }
-                    else
-                    {
-                        // 是 JSON 但没有 cmd 字段，直接返回错误
-                        return "{\"code\":1,\"msg\":\"missing cmd field\"}";
-                    }
+                    cmd_str = path;
                 }
-                catch (const std::exception&)
+                // 1. 有 body：尝试按 JSON 解析（为了兼容 {"cmd":"xxx"} 的格式）
+                else
                 {
-                    // 2. 解析失败 → 说明前端发的是裸字符串，直接用 body
-                    cmd_str = body;
+                    try
+                    {
+                        boost::json::value v = boost::json::parse(body);
+                        if (v.is_object() && v.as_object().contains("cmd") && v.as_object()["cmd"].is_string())
+                        {
+                            // 前端发的是 {"cmd":"GetUser"} → 提取 "GetUser"
+                            cmd_str = v.as_object()["cmd"].as_string().c_str();
+                        }
+                        else
+                        {
+                            // 是 JSON 但没有 cmd 字段，直接返回错误
+                            return "{\"code\":1,\"msg\":\"missing cmd field\"}";
+                        }
+                    }
+                    catch (const std::exception&)
+                    {
+                        // 2. 解析失败 → 说明前端发的是裸字符串，直接用 body
+                        cmd_str = body;
+                    }
                 }
 
                 // 3. 把字符串传给业务层

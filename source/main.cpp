@@ -10,7 +10,7 @@ int main()
     Utils::init();
 
     // 创建SQL连接（idx=0，与 HandleVueBiz 中 g_conns[0] 对应）
-    CreateConnection("127.0.0.1", "60000");
+    CreateConnection("127.0.0.1", "60919");
 
     Utils::Out::Out_Msg("网关运行中");
 

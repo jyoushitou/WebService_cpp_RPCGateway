@@ -54,6 +54,10 @@ struct PendingRequest
 
 //===客户端参数===
 
+// 后端微服务地址
+inline std::string g_backend_host;
+inline std::string g_backend_port;
+
 // 唯一内网连接
 inline std::mutex conn_mutex;
 inline std::shared_ptr<ConnItem> conn;
