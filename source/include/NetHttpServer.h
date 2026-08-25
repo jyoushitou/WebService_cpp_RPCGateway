@@ -88,13 +88,16 @@ namespace Net
 
                 // Boost.Beast 成员
                 boost::beast::flat_buffer buffer_;
-                boost::beast::http::request_parser<boost::beast::http::string_body> parser_;
+                // 用 unique_ptr 管理 parser，支持任意 Boost 版本的重置（拷贝赋值被删除，emplace 需要 1.85+）
+                std::unique_ptr<boost::beast::http::request_parser<boost::beast::http::string_body>> parser_ = nullptr;
 
                 // 所属 HttpServer
                 HttpServer* http_server;
                 // 请求方法、路径
                 std::string method_;
                 std::string path_;
+                // 请求方是否要求 Keep-Alive（HTTP/1.1 默认 true，解析请求后更新）
+                bool keep_alive_ = true;
             };
         } // namespace HttpServer
     } // namespace Server

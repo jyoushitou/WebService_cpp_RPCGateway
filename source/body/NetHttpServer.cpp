@@ -18,27 +18,49 @@ namespace Net
             HttpSession::HttpSession(boost::asio::io_context& io, boost::asio::ip::tcp::socket sock,
                                      HttpServer* http_server_)
                 : Net::Server::Session(io, std::move(sock), http_server_), http_server(http_server_),
-                  parser_(boost::beast::http::request_parser<boost::beast::http::string_body>{})
+                  parser_(std::make_unique<boost::beast::http::request_parser<boost::beast::http::string_body>>())
             {
             }
 
             void HttpSession::Start()
             {
+                // HTTP/1.1 默认 Keep-Alive：每个请求处理完后可能需要复用本连接继续读下一个请求，
+                // 这里把 parser_ 重置为初始状态（重新 make_unique，任何 Boost 版本都兼容）。
+                parser_ = std::make_unique<boost::beast::http::request_parser<boost::beast::http::string_body>>();
+
+                // ✅ 清空 buffer_ 残留数据（如果上一次读取有剩余字节，会干扰下一次解析）
+                buffer_.consume(buffer_.size());
+
                 // 异步读取 HTTP 请求头
                 boost::beast::http::async_read_header(
-                    sock, buffer_, parser_,
+                    sock, buffer_, *parser_,
                     [self = shared_from_this()](boost::system::error_code ec, std::size_t) mutable
                     {
+                        // ✅ 客户端在等待下一个请求时断开连接（Keep-Alive 正常收尾），
+                        //    这是正常关闭，不是错误，不打印红色日志。
+                        if (ec == boost::beast::http::error::end_of_stream)
+                        {
+                            Utils::Out::Out_Msg("Keep-Alive 等待期间客户端断开连接，正常关闭");
+                            self->Stop();
+                            return;
+                        }
+
                         // 检查读是否有错误
                         if (ec)
                         {
-                            Utils::Out::Out_Msg("收到的消息的等待有错误，错误码：" + ec.what());
-                            self->ActuallyClose();
+                            Utils::Out::Out_Err("HTTP 连接读取错误：" + ec.what());
+                            self->Stop();
                             return;
                         }
 
                         // 取出已经解析好的 HTTP 请求对象
-                        auto& req = self->parser_.get();
+                        auto& req = self->parser_->get();
+
+                        // ✅ 记录请求方是否要求 Keep-Alive（HTTP/1.1 默认 true）
+                        self->keep_alive_ = req.keep_alive();
+                        Utils::Out::Out_Msg(
+                            "HTTP 请求 keep_alive = " + std::string(self->keep_alive_ ? "true" : "false") +
+                            ", method = " + std::string(req.method_string()) + ", path = " + std::string(req.target()));
 
                         // 从解析出的 HTTP 请求中提取「请求方法」和「请求路径」
                         self->method_ = std::string(req.method_string());
@@ -46,10 +68,29 @@ namespace Net
 
                         // 根据 Content-Length 判断是否有 body
                         auto it_cl = req.find(boost::beast::http::field::content_length);
-                        if (it_cl != req.end() && !it_cl->value().empty() &&
-                            std::stoull(std::string(it_cl->value())) > 0)
+                        // 检查是不是在末尾或者字段为空
+                        if (it_cl != req.end() && !it_cl->value().empty())
                         {
-                            self->ReadBody();
+                            // ✅ 防御性解析：Content-Length 非法时直接返回 400，而不是崩溃
+                            unsigned long long content_length = 0;
+                            try
+                            {
+                                content_length = std::stoull(std::string(it_cl->value()));
+                            }
+                            catch (const std::exception&)
+                            {
+                                self->HttpSendResponse("{\"code\":1,\"msg\":\"invalid Content-Length\"}");
+                                return;
+                            }
+
+                            if (content_length > 0)
+                            {
+                                self->ReadBody();
+                            }
+                            else
+                            {
+                                self->HandleRequest("");
+                            }
                         }
                         else
                         {
@@ -63,20 +104,30 @@ namespace Net
             {
                 // 继续读取剩余的 body
                 boost::beast::http::async_read(
-                    sock, buffer_, parser_,
+                    sock, buffer_, *parser_,
                     [self = shared_from_this()](boost::system::error_code ec, std::size_t) mutable
                     {
+                        // ✅ 客户端在 body 未读完时断开连接（正常关闭），不是错误
+                        if (ec == boost::beast::http::error::end_of_stream)
+                        {
+                            self->Stop();
+                            return;
+                        }
+
                         // 检查读是否有错误
                         if (ec)
                         {
                             Utils::Out::Out_Msg("读取消息有错误，错误码：" + ec.what());
                             // 出现错误，关闭连接
-                            self->ActuallyClose();
+                            self->Stop();
                             return;
                         }
 
                         // 取出已经解析好的 HTTP 请求对象
-                        auto& req = self->parser_.get();
+                        auto& req = self->parser_->get();
+
+                        // ✅ 记录请求方是否要求 Keep-Alive
+                        self->keep_alive_ = req.keep_alive();
 
                         // 读取到消息体
                         std::string body = req.body();
@@ -86,17 +137,19 @@ namespace Net
                     });
             }
 
-            // 返回回调
+            // 处理请求（解析 body 并回复）
             void HttpSession::HandleRequest(const std::string& body)
             {
-                // 调用 HttpServer 的处理函数（在这里解析 JSON）
+                // 调用 HttpServer 的处理函数（在这里解析 JSON，可能返回同步响应字符串）
                 std::string response = http_server->HandleVueRequest(shared_from_this(), path_, body);
                 if (!response.empty())
                 {
+                    // 同步模式：直接发送响应
                     HttpSendResponse(response);
                 }
-                // 响应为空 → 异步模式：不发送、不关闭连接，
-                // 由 ClientWork 收到微服务结果后通过同一个 session 调用 AsyncSendResponse(msg) 发送
+                // 响应为空 → 异步模式：
+                // 不发送、不关闭连接，由 ClientWork 收到微服务结果后
+                // 通过同一个 session 调用 AsyncSendResponse(msg) 发送
             }
 
             // 线程安全发送响应（任何线程均可调用，通过 post 投递到 HttpServer 的 io_context 线程执行）
@@ -112,34 +165,67 @@ namespace Net
                 // 保活
                 auto self = shared_from_this();
 
-                // 创建一个状态码 200 的响应对象，`11` 表示 HTTP 版本 1.1
-                boost::beast::http::response<boost::beast::http::string_body> res{boost::beast::http::status::ok, 11};
+                // ✅ 用 shared_ptr 管理响应对象，保证 async_write 异步写操作期间对象存活
+                auto res = std::make_shared<boost::beast::http::response<boost::beast::http::string_body>>(
+                    boost::beast::http::status::ok, 11);
 
                 // 构建报文
-                res.set(boost::beast::http::field::server, "CppHttpServer/1.0");
-                res.set(boost::beast::http::field::content_type, "application/json");
+                res->set(boost::beast::http::field::server, "CppHttpServer/1.0");
+                res->set(boost::beast::http::field::content_type, "application/json");
                 // 允许跨域
-                res.set("Access-Control-Allow-Origin", "*");
+                res->set("Access-Control-Allow-Origin", "*");
                 // 消息体复制到发送里
-                res.body() = body;
+                res->body() = body;
+
+                // ✅ 根据请求方是否要求 Keep-Alive 设置 Connection 头。
+                //    注意：不能用 res->keep_alive()，新构造的响应对象其 keep_alive() 恒为 true，
+                //    会忽略客户端的 Connection: close。
+                if (keep_alive_)
+                {
+                    res->set(boost::beast::http::field::connection, "keep-alive");
+                }
+                else
+                {
+                    res->set(boost::beast::http::field::connection, "close");
+                }
 
                 // 根据 body 的内容自动计算并设置 HTTP 报文的 `Content-Length` 头（必要时还会调整
                 // `Transfer-Encoding`），让这个响应报文完整合法，可以被客户端正确解析。
-                res.prepare_payload();
+                res->prepare_payload();
 
-                boost::beast::http::async_write(sock, res,
-                                                [this, self](boost::system::error_code ec, std::size_t)
-                                                {
-                                                    // 判断是否有错误
-                                                    if (ec)
-                                                    {
-                                                        Utils::Out::Out_Msg("发送消息有错误，错误码：" + ec.what());
-                                                        ActuallyClose();
-                                                        return;
-                                                    }
-                                                    // 简单处理：发送完关闭连接
-                                                    ActuallyClose();
-                                                });
+                // 判断请求方是否要求关闭连接（HTTP/1.1 默认 keep-alive）
+                // ✅ 使用请求解析时保存的 keep_alive_，而不是 res->keep_alive()（恒为 true）
+                bool keep_alive = keep_alive_;
+                Utils::Out::Out_Msg("HttpSendResponse: keep_alive = " + std::string(keep_alive ? "true" : "false") +
+                                    ", Connection 头 = " + std::string(res->at(boost::beast::http::field::connection)));
+
+                boost::beast::http::async_write(
+                    sock, *res,
+                    [this, self, res, keep_alive](boost::system::error_code ec, std::size_t) mutable
+                    {
+                        // 判断是否有错误
+                        if (ec)
+                        {
+                            Utils::Out::Out_Err("HTTP 响应发送失败，错误码：" + ec.what());
+                            Stop();
+                            return;
+                        }
+
+                        Utils::Out::Out_Msg("HTTP 响应发送完成，keep_alive = " +
+                                            std::string(keep_alive ? "true" : "false"));
+
+                        // 发送成功：
+                        if (keep_alive)
+                        {
+                            // Keep-Alive：重置解析器后继续读取下一个 HTTP 请求
+                            Start();
+                        }
+                        else
+                        {
+                            // 客户端要求关闭连接
+                            Stop();
+                        }
+                    });
             }
 
             // 停止函数
@@ -157,7 +243,6 @@ namespace Net
                 : Net::Server::Server(io, ep), http_acceptor(io), http_port(http_port_)
             {
                 // 初始化 HTTP acceptor
-
                 boost::asio::ip::tcp::endpoint http_ep(boost::asio::ip::tcp::v4(), http_port);
 
                 // 用端点 `http_ep` 的协议（IPv4 或 IPv6）打开 acceptor。

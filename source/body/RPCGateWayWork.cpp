@@ -61,8 +61,8 @@ void RunHttpServer(int tcp_port, unsigned short http_port)
     SetConsoleCtrlHandler(Utils::Exit::ConsoleCtrlHandler, TRUE);
 #endif
 
-    Utils::Out::Out_Msg("正在启动 HTTP 服务器（TCP端口=" + std::to_string(tcp_port) +
-                        ", HTTP端口=" + std::to_string(http_port) + "）");
+    Utils::Out::Out_Msg("正在启动 HTTP 服务器（TCP端口：" + std::to_string(tcp_port) + ", HTTP端口：" +
+                        std::to_string(http_port) + "）");
 
     // 创建 io_context
     http_io_ptr = std::make_unique<boost::asio::io_context>();
@@ -85,9 +85,6 @@ void RunHttpServer(int tcp_port, unsigned short http_port)
     // io_context 在独立线程运行（捕获全局堆分配指针，而非局部变量引用）
     auto http_io = http_io_ptr.get();
     std::thread io_thread([http_io]() { http_io->run(); });
-
-    // 主线程等待退出标志
-    Utils::Exit::WaitExit();
 
     // 等待 io_context 线程结束
     if (io_thread.joinable())
