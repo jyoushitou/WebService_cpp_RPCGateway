@@ -1,6 +1,8 @@
 // NetHttpServer.cpp
 #include "NetHttpServer.h"
 
+#include <algorithm>
+
 namespace Net
 {
     namespace Server
@@ -20,6 +22,17 @@ namespace Net
                 : Net::Server::Session(io, std::move(sock), http_server_), http_server(http_server_),
                   parser_(std::make_unique<boost::beast::http::request_parser<boost::beast::http::string_body>>())
             {
+                // 创建时立即记录活动时间，防止刚建好就被清理线程误删
+                UpdateActiveTime();
+            }
+
+            // 更新最近活动时间
+            void HttpSession::UpdateActiveTime()
+            {
+                last_active_ms.store(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         std::chrono::steady_clock::now().time_since_epoch())
+                                         .count(),
+                                     std::memory_order_relaxed);
             }
 
             void HttpSession::Start()
@@ -30,6 +43,9 @@ namespace Net
 
                 // ✅ 清空 buffer_ 残留数据（如果上一次读取有剩余字节，会干扰下一次解析）
                 buffer_.consume(buffer_.size());
+
+                // 读请求前更新活动时间
+                UpdateActiveTime();
 
                 // 异步读取 HTTP 请求头
                 boost::beast::http::async_read_header(
@@ -52,6 +68,9 @@ namespace Net
                             self->Stop();
                             return;
                         }
+
+                        // 有请求活动，更新时间戳
+                        self->UpdateActiveTime();
 
                         // 取出已经解析好的 HTTP 请求对象
                         auto& req = self->parser_->get();
@@ -123,6 +142,9 @@ namespace Net
                             return;
                         }
 
+                        // body 读到了，更新活动时间
+                        self->UpdateActiveTime();
+
                         // 取出已经解析好的 HTTP 请求对象
                         auto& req = self->parser_->get();
 
@@ -140,16 +162,21 @@ namespace Net
             // 处理请求（解析 body 并回复）
             void HttpSession::HandleRequest(const std::string& body)
             {
+                // 标记忙碌：请求处理期间（包括异步等待微服务返回）不允许被清理线程关闭
+                busy.store(true, std::memory_order_relaxed);
+                UpdateActiveTime();
+
                 // 调用 HttpServer 的处理函数（在这里解析 JSON，可能返回同步响应字符串）
                 std::string response = http_server->HandleVueRequest(shared_from_this(), path_, body);
                 if (!response.empty())
                 {
-                    // 同步模式：直接发送响应
+                    // 同步模式：直接发送响应（发送完成回调里会清除 busy）
                     HttpSendResponse(response);
                 }
                 // 响应为空 → 异步模式：
                 // 不发送、不关闭连接，由 ClientWork 收到微服务结果后
                 // 通过同一个 session 调用 AsyncSendResponse(msg) 发送
+                // busy 保持 true，直到异步响应发送完成后才清除
             }
 
             // 线程安全发送响应（任何线程均可调用，通过 post 投递到 HttpServer 的 io_context 线程执行）
@@ -203,6 +230,11 @@ namespace Net
                     sock, *res,
                     [this, self, res, keep_alive](boost::system::error_code ec, std::size_t) mutable
                     {
+                        // 请求处理完毕（无论成功/失败），清除忙碌标记
+                        busy.store(false, std::memory_order_relaxed);
+                        // 更新活动时间，防止发完响应后立刻被清理线程误杀
+                        UpdateActiveTime();
+
                         // 判断是否有错误
                         if (ec)
                         {
@@ -233,6 +265,10 @@ namespace Net
             {
                 // 继承自 Session::Stop()，通过 io_context 投递关闭操作
                 Net::Server::Session::Stop();
+
+                // 从 HttpServer 的会话列表移除（如果是清理线程关闭的，也会走这里）
+                if (http_server)
+                    http_server->RemoveSession(shared_from_this());
             }
 
             //========== HttpServer ==========
@@ -321,6 +357,74 @@ namespace Net
 
                 // 调用基类 Stop（关 TCP acceptor + 唤醒消息队列）
                 Net::Server::Server::Stop();
+            }
+
+            // 移除并关闭指定会话（io_context 线程内调用）
+            void HttpServer::RemoveSession(std::shared_ptr<HttpSession> session)
+            {
+                // 通过 post 投递到 io_context 线程执行，避免跨线程改 vector
+                auto self = shared_from_this();
+                boost::asio::post(ioc,
+                                  [this, self, session]() mutable
+                                  {
+                                      // 从 vector 中查找并移除
+                                      auto it = std::find(http_sessions.begin(), http_sessions.end(), session);
+                                      if (it != http_sessions.end())
+                                      {
+                                          Utils::Out::Out_Msg("移除空闲/断开 HTTP Session");
+                                          http_sessions.erase(it);
+                                      }
+                                  });
+            }
+
+            // 清理空闲超时的 HTTP 会话
+            // 清理线程每隔一段时间调用；内部通过 post 投递到 io_context 线程执行真正的清理
+            void HttpServer::CleanupIdleSessions(long long idle_timeout_ms)
+            {
+                auto self = shared_from_this();
+                boost::asio::post(ioc,
+                                  [this, self, idle_timeout_ms]() mutable
+                                  {
+                                      long long now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                             std::chrono::steady_clock::now().time_since_epoch())
+                                                             .count();
+
+                                      size_t before = http_sessions.size();
+                                      size_t removed = 0;
+
+                                      // 遍历并清理：超时 + 非忙碌 的会话
+                                      for (auto it = http_sessions.begin(); it != http_sessions.end();)
+                                      {
+                                          auto& s = *it;
+                                          // 正在处理请求（如等待微服务返回）的会话不清理
+                                          if (s->busy.load(std::memory_order_relaxed))
+                                          {
+                                              ++it;
+                                              continue;
+                                          }
+
+                                          long long last = s->last_active_ms.load(std::memory_order_relaxed);
+                                          if (now_ms - last > idle_timeout_ms)
+                                          {
+                                              Utils::Out::Out_Msg("清理空闲超时 HTTP Session，空闲时长 = " +
+                                                                  std::to_string(now_ms - last) + " ms");
+                                              s->Stop();
+                                              it = http_sessions.erase(it);
+                                              ++removed;
+                                          }
+                                          else
+                                          {
+                                              ++it;
+                                          }
+                                      }
+
+                                      if (removed > 0)
+                                      {
+                                          Utils::Out::Out_Msg("清理 HTTP 会话完成：清理前 = " + std::to_string(before) +
+                                                              ", 清理 = " + std::to_string(removed) +
+                                                              ", 剩余 = " + std::to_string(http_sessions.size()));
+                                      }
+                                  });
             }
 
             // 注册回调函数

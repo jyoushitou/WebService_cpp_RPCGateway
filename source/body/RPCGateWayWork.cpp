@@ -86,9 +86,38 @@ void RunHttpServer(int tcp_port, unsigned short http_port)
     auto http_io = http_io_ptr.get();
     std::thread io_thread([http_io]() { http_io->run(); });
 
+    // 启动空闲 Session 清理线程（每 5 秒检查一次，空闲 60 秒清理）
+    std::thread cleanup_thread(
+        [http_server]()
+        {
+            constexpr long long kIdleTimeoutMs = 60 * 1000; // 60 秒无活动则关闭
+            constexpr int kCheckIntervalMs = 5000;          // 每 5 秒检查一次
+
+            while (!Utils::Exit::exit_flag.load())
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(kCheckIntervalMs));
+
+                // 睡醒后再次检查：退出过程中不再执行清理
+                if (Utils::Exit::exit_flag.load())
+                    break;
+
+                // 清理空闲超时的 HTTP 会话
+                http_server->CleanupIdleSessions(kIdleTimeoutMs);
+            }
+
+            Utils::Out::Out_Msg("HTTP Session 清理线程退出");
+        });
+
     // 等待 io_context 线程结束
     if (io_thread.joinable())
         io_thread.join();
+
+    // 置退出标志，唤醒清理线程退出
+    Utils::Exit::exit_flag.store(true);
+
+    // 等待清理线程结束
+    if (cleanup_thread.joinable())
+        cleanup_thread.join();
 
     // 释放顺序必须正确：先 server，再 http_io（必须在线程 join 之后，否则 abort）
     server_ptr.reset();

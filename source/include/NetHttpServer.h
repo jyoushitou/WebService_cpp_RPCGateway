@@ -3,6 +3,8 @@
 
 #include <vector>
 #include <functional>
+#include <atomic>
+#include <chrono>
 
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
@@ -46,6 +48,12 @@ namespace Net
                 std::string HandleVueRequest(std::shared_ptr<HttpSession> session, const std::string& path,
                                              const std::string& body);
 
+                // 清理空闲超时的 HTTP 会话（清理线程调用，内部 post 到 io_context 线程执行）
+                void CleanupIdleSessions(long long idle_timeout_ms);
+
+                // 移除并关闭指定会话（io_context 线程内调用）
+                void RemoveSession(std::shared_ptr<HttpSession> session);
+
             private:
                 // 业务回调存储
                 // HTTP 监听器
@@ -80,6 +88,14 @@ namespace Net
                 // 关闭连接
                 void Stop();
 
+                // 更新最近活动时间
+                void UpdateActiveTime();
+
+                // 最近一次活动时间（steady_clock 毫秒）
+                std::atomic<long long> last_active_ms{0};
+                // 是否正在处理请求（避免清理线程误杀正在等待微服务返回的会话）
+                std::atomic<bool> busy{false};
+
             protected:
                 // 读取请求体
                 void ReadBody();
@@ -98,6 +114,8 @@ namespace Net
                 std::string path_;
                 // 请求方是否要求 Keep-Alive（HTTP/1.1 默认 true，解析请求后更新）
                 bool keep_alive_ = true;
+
+                //
             };
         } // namespace HttpServer
     } // namespace Server
