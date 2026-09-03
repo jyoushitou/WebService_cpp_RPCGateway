@@ -41,8 +41,11 @@ namespace Net
                 // 这里把 parser_ 重置为初始状态（重新 make_unique，任何 Boost 版本都兼容）。
                 parser_ = std::make_unique<boost::beast::http::request_parser<boost::beast::http::string_body>>();
 
-                // ✅ 清空 buffer_ 残留数据（如果上一次读取有剩余字节，会干扰下一次解析）
+                // 清空 buffer_ 残留数据（如果上一次读取有剩余字节，会干扰下一次解析）
                 buffer_.consume(buffer_.size());
+
+                // 清空url，避免因为之前的url造成错误
+                url = {};
 
                 // 读请求前更新活动时间
                 UpdateActiveTime();
@@ -52,8 +55,8 @@ namespace Net
                     sock, buffer_, *parser_,
                     [self = shared_from_this()](boost::system::error_code ec, std::size_t) mutable
                     {
-                        // ✅ 客户端在等待下一个请求时断开连接（Keep-Alive 正常收尾），
-                        //    这是正常关闭，不是错误，不打印红色日志。
+                        // 客户端在等待下一个请求时断开连接（Keep-Alive 正常收尾），
+                        // 这是正常关闭，不是错误，不打印红色日志。
                         if (ec == boost::beast::http::error::end_of_stream)
                         {
                             Utils::Out::Out_Msg("Keep-Alive 等待期间客户端断开连接，正常关闭");
@@ -75,22 +78,18 @@ namespace Net
                         // 取出已经解析好的 HTTP 请求对象
                         auto& req = self->parser_->get();
 
-                        // ✅ 记录请求方是否要求 Keep-Alive（HTTP/1.1 默认 true）
-                        self->keep_alive_ = req.keep_alive();
-                        Utils::Out::Out_Msg(
-                            "HTTP 请求 keep_alive = " + std::string(self->keep_alive_ ? "true" : "false") +
-                            ", method = " + std::string(req.method_string()) + ", path = " + std::string(req.target()));
+                        // 记录请求方是否要求 Keep-Alive（HTTP/1.1 默认 true）
+                        self->url.keep_alive = req.keep_alive();
 
-                        // 从解析出的 HTTP 请求中提取「请求方法」和「请求路径」
-                        self->method_ = std::string(req.method_string());
-                        self->path_ = std::string(req.target());
+                        // 路由
+                        self->Router(std::string(req.method_string()), std::string(req.target()));
 
                         // 根据 Content-Length 判断是否有 body
                         auto it_cl = req.find(boost::beast::http::field::content_length);
                         // 检查是不是在末尾或者字段为空
                         if (it_cl != req.end() && !it_cl->value().empty())
                         {
-                            // ✅ 防御性解析：Content-Length 非法时直接返回 400，而不是崩溃
+                            // 防御性解析：Content-Length 非法时直接返回 400
                             unsigned long long content_length = 0;
                             try
                             {
@@ -108,12 +107,12 @@ namespace Net
                             }
                             else
                             {
-                                self->HandleRequest("");
+                                self->HandleRequest();
                             }
                         }
                         else
                         {
-                            self->HandleRequest("");
+                            self->HandleRequest();
                         }
                     });
             }
@@ -121,12 +120,12 @@ namespace Net
             // 读取消息体
             void HttpSession::ReadBody()
             {
-                // 继续读取剩余的 body
+                // 读取body
                 boost::beast::http::async_read(
                     sock, buffer_, *parser_,
                     [self = shared_from_this()](boost::system::error_code ec, std::size_t) mutable
                     {
-                        // ✅ 客户端在 body 未读完时断开连接（正常关闭），不是错误
+                        // 客户端在 body 未读完时断开连接（正常关闭），不是错误
                         if (ec == boost::beast::http::error::end_of_stream)
                         {
                             self->Stop();
@@ -148,26 +147,28 @@ namespace Net
                         // 取出已经解析好的 HTTP 请求对象
                         auto& req = self->parser_->get();
 
-                        // ✅ 记录请求方是否要求 Keep-Alive
-                        self->keep_alive_ = req.keep_alive();
+                        // 记录请求方是否要求 Keep-Alive
+                        self->url.keep_alive = req.keep_alive();
 
                         // 读取到消息体
-                        std::string body = req.body();
+                        self->url.body = req.body();
 
                         // 调用回调函数
-                        self->HandleRequest(body);
+                        self->HandleRequest();
                     });
             }
 
             // 处理请求（解析 body 并回复）
-            void HttpSession::HandleRequest(const std::string& body)
+            void HttpSession::HandleRequest()
             {
                 // 标记忙碌：请求处理期间（包括异步等待微服务返回）不允许被清理线程关闭
                 busy.store(true, std::memory_order_relaxed);
+
+                // 更新时间
                 UpdateActiveTime();
 
                 // 调用 HttpServer 的处理函数（在这里解析 JSON，可能返回同步响应字符串）
-                std::string response = http_server->HandleVueRequest(shared_from_this(), path_, body);
+                std::string response = http_server->HandleVueRequest(shared_from_this(), url);
                 if (!response.empty())
                 {
                     // 同步模式：直接发送响应（发送完成回调里会清除 busy）
@@ -204,10 +205,11 @@ namespace Net
                 // 消息体复制到发送里
                 res->body() = body;
 
-                // ✅ 根据请求方是否要求 Keep-Alive 设置 Connection 头。
-                //    注意：不能用 res->keep_alive()，新构造的响应对象其 keep_alive() 恒为 true，
-                //    会忽略客户端的 Connection: close。
-                if (keep_alive_)
+                // ✅ 使用类成员 url.keep_alive（请求解析时保存），而不是 res->keep_alive()（恒为 true）
+                bool keep_alive = url.keep_alive;
+
+                // ✅ 根据请求方是否要求 Keep-Alive 设置 Connection 头
+                if (keep_alive)
                 {
                     res->set(boost::beast::http::field::connection, "keep-alive");
                 }
@@ -216,13 +218,9 @@ namespace Net
                     res->set(boost::beast::http::field::connection, "close");
                 }
 
-                // 根据 body 的内容自动计算并设置 HTTP 报文的 `Content-Length` 头（必要时还会调整
-                // `Transfer-Encoding`），让这个响应报文完整合法，可以被客户端正确解析。
+                // 根据 body 的内容自动计算并设置 HTTP 报文的 `Content-Length` 头
                 res->prepare_payload();
 
-                // 判断请求方是否要求关闭连接（HTTP/1.1 默认 keep-alive）
-                // ✅ 使用请求解析时保存的 keep_alive_，而不是 res->keep_alive()（恒为 true）
-                bool keep_alive = keep_alive_;
                 Utils::Out::Out_Msg("HttpSendResponse: keep_alive = " + std::string(keep_alive ? "true" : "false") +
                                     ", Connection 头 = " + std::string(res->at(boost::beast::http::field::connection)));
 
@@ -269,6 +267,39 @@ namespace Net
                 // 从 HttpServer 的会话列表移除（如果是清理线程关闭的，也会走这里）
                 if (http_server)
                     http_server->RemoveSession(shared_from_this());
+            }
+
+            // 路由
+            void HttpSession::Router(const std::string method, std::string target)
+            {
+                // 防御性检查：target 太短时 substr(pos) 会抛 out_of_range，必须拦截
+                if (target.size() < 5)
+                    return;
+
+                // 路由到对应的服务器（保持原有判断语义：从下标 5 开始取 13 个字符比较 "articles"）
+                if (target.substr(5, 13) == "articles")
+                {
+                    url.serviceID = 13;
+
+                    // 有足够字符才做后续解析，避免 substr(14) 越界抛异常
+                    if (target.size() >= 14)
+                    {
+                        if (target.substr(14, target.size()) == "meta")
+                        {
+                            url.cmd = 1;
+                        }
+                        else
+                        {
+                            url.cmd = 2;
+                            url.slug = target.substr(14, target.size());
+                        }
+                    }
+                    else
+                    {
+                        // 只有 /api/articles 或更短路径
+                        url.cmd = 2;
+                    }
+                }
             }
 
             //========== HttpServer ==========
@@ -434,48 +465,40 @@ namespace Net
             }
 
             // 回调函数过去
-            std::string HttpServer::HandleVueRequest(std::shared_ptr<HttpSession> session, const std::string& path,
-                                                     const std::string& body)
+            std::string HttpServer::HandleVueRequest(std::shared_ptr<HttpSession> session,
+                                                     Net::Server::HttpServer::Url url)
             {
-                std::string cmd_str;
-
-                // 0. body 为空（GET 请求等）：直接用 URL 路径作为命令
-                //    例如：GET /api/articles → cmd_str = "/api/articles"
-                if (body.empty())
+                // 尝试按 JSON 解析（兼容 {"cmd":"xxx"} 的格式）
+                try
                 {
-                    cmd_str = path;
-                }
-                // 1. 有 body：尝试按 JSON 解析（为了兼容 {"cmd":"xxx"} 的格式）
-                else
-                {
-                    try
+                    boost::json::value v = boost::json::parse(url.body);
+                    if (v.is_object() && v.as_object().contains("cmd") && v.as_object()["cmd"].is_string())
                     {
-                        boost::json::value v = boost::json::parse(body);
-                        if (v.is_object() && v.as_object().contains("cmd") && v.as_object()["cmd"].is_string())
+                        // 前端发的是 {"cmd":"GetUser"} → 提取 "GetUser"
+                        if (v.as_object()["cmd"].as_string() == "GetUser")
                         {
-                            // 前端发的是 {"cmd":"GetUser"} → 提取 "GetUser"
-                            cmd_str = v.as_object()["cmd"].as_string().c_str();
-                        }
-                        else
-                        {
-                            // 是 JSON 但没有 cmd 字段，直接返回错误
-                            return "{\"code\":1,\"msg\":\"missing cmd field\"}";
+                            url.cmd = 1;
+                            url.body = "";
                         }
                     }
-                    catch (const std::exception&)
+                    else
                     {
-                        // 2. 解析失败 → 说明前端发的是裸字符串，直接用 body
-                        cmd_str = body;
+                        // 是 JSON 但没有 cmd 字段，直接返回错误
+                        return "{\"code\":1,\"msg\":\"missing cmd field\"}";
                     }
                 }
+                catch (const std::exception&)
+                {
+                    // 解析失败 → 说明前端发的是裸字符串，body 原样保留，直接透传给业务层
+                    return "{\"code\":3,\"msg\":\"recivcemsg error\"}";
+                }
 
-                // 3. 把字符串传给业务层
+                //  把解析后的 url 传给业务层
                 if (handle_vue_cb)
-                    return handle_vue_cb(session, path, cmd_str);
+                    return handle_vue_cb(session, url);
 
                 return "{\"code\":2,\"msg\":\"business callback not set\"}";
             }
-
         } // namespace HttpServer
     } // namespace Server
 } // namespace Net

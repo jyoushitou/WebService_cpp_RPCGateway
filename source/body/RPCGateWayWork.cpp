@@ -125,16 +125,15 @@ void RunHttpServer(int tcp_port, unsigned short http_port)
 }
 
 // 转发回调
-std::string HandleVueBiz(std::shared_ptr<Net::Server::HttpServer::HttpSession> session, const std::string& path,
-                         const std::string& cmd_str)
+std::string HandleVueBiz(std::shared_ptr<Net::Server::HttpServer::HttpSession> session,
+                         const Net::Server::HttpServer::Url url)
 {
-    Utils::Out::Out_Msg("[业务层] 收到命令: " + cmd_str + ", path=" + path);
-
+    Utils::Out::Out_Msg("收到命令vue3命令: " + std::to_string(url.cmd) + "目标服务器" + ServiceID[url.serviceID]);
     // 分配 msg_id + 记录回包会话
     unsigned long long msg_id = Net::g_net_msg_id.fetch_add(1);
     {
         std::lock_guard<std::mutex> lock(g_pending_mutex);
-        g_pending[msg_id] = PendingRequest{session, path};
+        g_pending[msg_id] = PendingRequest{session, url};
     }
 
     std::shared_ptr<Net::Client::Client> client;
@@ -152,8 +151,10 @@ std::string HandleVueBiz(std::shared_ptr<Net::Server::HttpServer::HttpSession> s
         return "{\"code\":500,\"msg\":\"no backend connection\"}";
     }
 
-    // 直接把字符串发给目标连接（微服务端收到这个字符串后自行处理）
-    client->ToSend(msg_id, cmd_str);
+    Blog::router
+
+        // 把转换好的string发给Blog
+        client->ToSend(msg_id, );
 
     // 不在此处返回响应，由 ClientWork 收到微服务结果后通过 session->AsyncSendResponse(msg) 异步返回
     return "";

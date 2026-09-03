@@ -48,8 +48,8 @@ struct PendingRequest
 {
     // 等回包的 HTTP 会话
     std::shared_ptr<Net::Server::HttpServer::HttpSession> session;
-    // 原来的请求路径
-    std::string path;
+    // 原来的url
+    Net::Server::HttpServer::Url url;
 };
 
 //===客户端参数===
@@ -74,6 +74,7 @@ inline std::unique_ptr<boost::asio::io_context> http_io_ptr;
 
 // msg_id → PendingRequest 映射
 inline std::mutex g_pending_mutex;
+// 登记发送与接收表
 inline std::unordered_map<unsigned long long, PendingRequest> g_pending;
 
 //===服务器函数===
@@ -82,8 +83,8 @@ inline std::unordered_map<unsigned long long, PendingRequest> g_pending;
 void RunHttpServer(int tcp_port, unsigned short http_port);
 
 // 转发函数
-std::string HandleVueBiz(std::shared_ptr<Net::Server::HttpServer::HttpSession> session, const std::string& path,
-                         const std::string& cmd_str);
+std::string HandleVueBiz(std::shared_ptr<Net::Server::HttpServer::HttpSession> session,
+                         const Net::Server::HttpServer::Url url);
 
 //===客户端函数===
 // 客户端的

@@ -56,11 +56,13 @@ find_package(Boost COMPONENTS json REQUIRED)
 add_executable(${PROJECT_NAME}
     main.cpp
     ../../common/cpp/body/Common.pb.cc
+    ../../common/cpp/body/Blog.pb.cc
     ../../common/cpp/body/Utils.cpp
     ../../common/cpp/body/ThreadPool.cpp
     ../../common/cpp/body/NetConnection.cpp
     ../../common/cpp/body/NetServer.cpp
     ../../common/cpp/body/NetClient.cpp
+    body/JsonToProto.cpp
     body/NetHttpServer.cpp
     body/RPCGateWayWork.cpp
 )

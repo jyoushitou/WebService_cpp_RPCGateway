@@ -5,6 +5,7 @@
 #include <functional>
 #include <atomic>
 #include <chrono>
+#include <string>
 
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
@@ -14,6 +15,7 @@
 #include "Utils.h"
 #include "NetConnection.h"
 #include "NetServer.h"
+#include "JsonToProto.h"
 
 namespace Net
 {
@@ -21,6 +23,21 @@ namespace Net
     {
         namespace HttpServer
         {
+            // 存储转换数据流结构
+            struct Url
+            {
+                // 服务器ID
+                int serviceID = 0;
+                // 命令
+                int cmd = 0;
+                // 命令目录
+                std::string slug;
+                // 消息体
+                std::string body;
+                // kee_alive状态
+                bool keep_alive = true;
+            };
+
             // 向前声明
             class HttpSession;
 
@@ -38,15 +55,14 @@ namespace Net
                 void Stop() override;
 
                 // 业务回调类型
-                using VueRequestCallback = std::function<std::string(
-                    std::shared_ptr<HttpSession> session, const std::string& path, const std::string& cmd_str)>;
+                using VueRequestCallback = std::function<std::string(std::shared_ptr<HttpSession> session,
+                                                                     const Net::Server::HttpServer::Url url)>;
 
                 // 注册回调
                 void SetHandleVueRequestCallback(VueRequestCallback cb);
 
                 // 处理 Vue3 请求，返回 JSON 响应字符串
-                std::string HandleVueRequest(std::shared_ptr<HttpSession> session, const std::string& path,
-                                             const std::string& body);
+                std::string HandleVueRequest(std::shared_ptr<HttpSession> session, Net::Server::HttpServer::Url url);
 
                 // 清理空闲超时的 HTTP 会话（清理线程调用，内部 post 到 io_context 线程执行）
                 void CleanupIdleSessions(long long idle_timeout_ms);
@@ -100,7 +116,9 @@ namespace Net
                 // 读取请求体
                 void ReadBody();
                 // 处理请求（解析 body 并回复）
-                void HandleRequest(const std::string& body);
+                void HandleRequest();
+                // 处理路由
+                void Router(const std::string method, std::string target);
 
                 // Boost.Beast 成员
                 boost::beast::flat_buffer buffer_;
@@ -109,13 +127,9 @@ namespace Net
 
                 // 所属 HttpServer
                 HttpServer* http_server;
-                // 请求方法、路径
-                std::string method_;
-                std::string path_;
-                // 请求方是否要求 Keep-Alive（HTTP/1.1 默认 true，解析请求后更新）
-                bool keep_alive_ = true;
 
-                //
+                // 存储url传来的状态
+                Url url;
             };
         } // namespace HttpServer
     } // namespace Server
