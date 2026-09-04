@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RPCGateWayWork.h"
+#include "Blog.pb.h"
 
 // 服务器ID
 int Utils::serviceID = 1;
@@ -128,7 +129,8 @@ void RunHttpServer(int tcp_port, unsigned short http_port)
 std::string HandleVueBiz(std::shared_ptr<Net::Server::HttpServer::HttpSession> session,
                          const Net::Server::HttpServer::Url url)
 {
-    Utils::Out::Out_Msg("收到命令vue3命令: " + std::to_string(url.cmd) + "目标服务器" + ServiceID[url.serviceID]);
+    Utils::Out::Out_Msg("收到命令vue3命令: " + std::to_string(url.head.command()) + "目标服务器" +
+                        ServiceID[url.head.serviceid()]);
     // 分配 msg_id + 记录回包会话
     unsigned long long msg_id = Net::g_net_msg_id.fetch_add(1);
     {
@@ -151,10 +153,17 @@ std::string HandleVueBiz(std::shared_ptr<Net::Server::HttpServer::HttpSession> s
         return "{\"code\":500,\"msg\":\"no backend connection\"}";
     }
 
-    Blog::router
+    // 构建发送消息变量
+    std::string msg = "";
 
-        // 把转换好的string发给Blog
-        client->ToSend(msg_id, );
+    // 变量
+    if (url.head.serviceid() == 1)
+    {
+        BlogRouter(url, msg);
+    }
+
+    // 把转换好的string发给服务器
+    client->ToSend(msg_id, msg);
 
     // 不在此处返回响应，由 ClientWork 收到微服务结果后通过 session->AsyncSendResponse(msg) 异步返回
     return "";
@@ -279,4 +288,23 @@ void CreateConnection(const std::string& host, const std::string& port)
         std::lock_guard<std::mutex> lock(conn_mutex);
         conn = new_conn;
     }
+}
+
+// Blog路由
+void BlogRouter(const Net::Server::HttpServer::Url url, std::string& msg)
+{
+    Blog::router blog;
+    blog.mutable_head()->CopyFrom(url.head);
+    if (url.head.command() == 1)
+    {
+        blog.set_body("");
+    }
+    else if (url.head.command() == 2)
+    {
+        blog.set_body(url.body);
+    }
+    else
+    {
+    }
+    blog.SerializeToString(&msg);
 }

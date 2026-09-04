@@ -86,6 +86,9 @@ void RunHttpServer(int tcp_port, unsigned short http_port);
 std::string HandleVueBiz(std::shared_ptr<Net::Server::HttpServer::HttpSession> session,
                          const Net::Server::HttpServer::Url url);
 
+// Blog路由
+void BlogRouter(const Net::Server::HttpServer::Url url, std::string& msg);
+
 //===客户端函数===
 // 客户端的
 

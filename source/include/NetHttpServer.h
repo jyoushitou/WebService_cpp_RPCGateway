@@ -12,10 +12,11 @@
 #include <boost/beast/http.hpp>
 #include <boost/json.hpp>
 
+#include "Common.pb.h"
+
 #include "Utils.h"
 #include "NetConnection.h"
 #include "NetServer.h"
-#include "JsonToProto.h"
 
 namespace Net
 {
@@ -26,13 +27,9 @@ namespace Net
             // 存储转换数据流结构
             struct Url
             {
-                // 服务器ID
-                int serviceID = 0;
-                // 命令
-                int cmd = 0;
-                // 命令目录
-                std::string slug;
-                // 消息体
+                // 统一消息头
+                common::header head;
+                // 剩余消息体
                 std::string body;
                 // kee_alive状态
                 bool keep_alive = true;

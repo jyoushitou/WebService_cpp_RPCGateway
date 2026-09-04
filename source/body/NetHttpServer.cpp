@@ -279,25 +279,25 @@ namespace Net
                 // 路由到对应的服务器（保持原有判断语义：从下标 5 开始取 13 个字符比较 "articles"）
                 if (target.substr(5, 13) == "articles")
                 {
-                    url.serviceID = 13;
+                    url.head.set_serviceid(13);
 
                     // 有足够字符才做后续解析，避免 substr(14) 越界抛异常
                     if (target.size() >= 14)
                     {
                         if (target.substr(14, target.size()) == "meta")
                         {
-                            url.cmd = 1;
+                            url.head.set_command(1);
                         }
                         else
                         {
-                            url.cmd = 2;
-                            url.slug = target.substr(14, target.size());
+                            url.head.set_command(2);
+                            url.body = target.substr(14, target.size());
                         }
                     }
                     else
                     {
                         // 只有 /api/articles 或更短路径
-                        url.cmd = 2;
+                        return;
                     }
                 }
             }
@@ -477,7 +477,7 @@ namespace Net
                         // 前端发的是 {"cmd":"GetUser"} → 提取 "GetUser"
                         if (v.as_object()["cmd"].as_string() == "GetUser")
                         {
-                            url.cmd = 1;
+                            url.head.set_command(1);
                             url.body = "";
                         }
                     }
