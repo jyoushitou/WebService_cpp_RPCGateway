@@ -1,6 +1,8 @@
 #pragma once
 
 #include "RPCGateWayWork.h"
+
+#include "Common.pb.h"
 #include "Blog.pb.h"
 
 // 服务器ID
@@ -159,7 +161,7 @@ std::string HandleVueBiz(std::shared_ptr<Net::Server::HttpServer::HttpSession> s
     // 变量
     if (url.head.serviceid() == 1)
     {
-        BlogRouter(url, msg);
+        UrlToBlogString(url, msg);
     }
 
     // 把转换好的string发给服务器
@@ -190,6 +192,7 @@ void ClientWork(unsigned long long msg_id, const std::string& msg)
     // 有就回给前端（AsyncSendResponse 内部 post 到 HTTP io_context 线程执行，避免跨线程操作 socket）
     if (session)
     {
+        // 这里解析成对应的json
         session->AsyncSendResponse(msg); // msg 就是微服务返回的结果
     }
     else
@@ -291,7 +294,7 @@ void CreateConnection(const std::string& host, const std::string& port)
 }
 
 // Blog路由
-void BlogRouter(const Net::Server::HttpServer::Url url, std::string& msg)
+void UrlToBlogString(const Net::Server::HttpServer::Url url, std::string& msg)
 {
     Blog::router blog;
     blog.mutable_head()->CopyFrom(url.head);
@@ -307,4 +310,16 @@ void BlogRouter(const Net::Server::HttpServer::Url url, std::string& msg)
     {
     }
     blog.SerializeToString(&msg);
+}
+
+// 解析传回来的Proto成JSON
+std::string ProtoToJson(std::string msg)
+{
+    // 反序列化
+    common::header head;
+    head.ParseFromString(msg);
+    std::string body = head.msg();
+    if (head.serviceid() == 13)
+    {
+    }
 }

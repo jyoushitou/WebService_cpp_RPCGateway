@@ -87,7 +87,10 @@ std::string HandleVueBiz(std::shared_ptr<Net::Server::HttpServer::HttpSession> s
                          const Net::Server::HttpServer::Url url);
 
 // Blog路由
-void BlogRouter(const Net::Server::HttpServer::Url url, std::string& msg);
+void UrlToBlogString(const Net::Server::HttpServer::Url url, std::string& msg);
+
+// 解析传回来的Proto成JSON
+std::string ProtoToJson(std::string msg);
 
 //===客户端函数===
 // 客户端的
