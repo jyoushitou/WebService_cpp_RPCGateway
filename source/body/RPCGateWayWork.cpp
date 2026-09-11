@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RPCGateWayWork.h"
+#include "ProtoBufToJson.h"
 
 #include "Common.pb.h"
 #include "Blog.pb.h"
@@ -290,36 +291,5 @@ void CreateConnection(const std::string& host, const std::string& port)
     {
         std::lock_guard<std::mutex> lock(conn_mutex);
         conn = new_conn;
-    }
-}
-
-// Blog路由
-void UrlToBlogString(const Net::Server::HttpServer::Url url, std::string& msg)
-{
-    Blog::router blog;
-    blog.mutable_head()->CopyFrom(url.head);
-    if (url.head.command() == 1)
-    {
-        blog.set_body("");
-    }
-    else if (url.head.command() == 2)
-    {
-        blog.set_body(url.body);
-    }
-    else
-    {
-    }
-    blog.SerializeToString(&msg);
-}
-
-// 解析传回来的Proto成JSON
-std::string ProtoToJson(std::string msg)
-{
-    // 反序列化
-    common::header head;
-    head.ParseFromString(msg);
-    std::string body = head.msg();
-    if (head.serviceid() == 13)
-    {
     }
 }

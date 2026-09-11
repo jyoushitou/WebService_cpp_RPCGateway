@@ -7,8 +7,7 @@
 
 #include "Utils.h"
 #include "Message.h"
-
-#include <boost/asio.hpp>
+#include "JsonStruct.h"
 
 #include <memory>
 #include <thread>
