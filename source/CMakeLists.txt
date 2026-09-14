@@ -62,7 +62,7 @@ add_executable(${PROJECT_NAME}
     ../../common/cpp/body/NetConnection.cpp
     ../../common/cpp/body/NetServer.cpp
     ../../common/cpp/body/NetClient.cpp
-    body/JsonToProto.cpp
+    body/JsonAndProtoBuf.cpp
     body/NetHttpServer.cpp
     body/RPCGateWayWork.cpp
 )

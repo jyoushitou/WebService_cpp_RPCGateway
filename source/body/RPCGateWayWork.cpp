@@ -1,7 +1,7 @@
 #pragma once
 
 #include "RPCGateWayWork.h"
-#include "ProtoBufToJson.h"
+#include "JsonAndProtoBuf.h"
 
 #include "Common.pb.h"
 
@@ -156,13 +156,7 @@ std::string HandleVueBiz(std::shared_ptr<Net::Server::HttpServer::HttpSession> s
     }
 
     // 构建发送消息变量
-    std::string msg = "";
-
-    // 变量
-    if (url.head.serviceid() == 1)
-    {
-        Json::blog::UrlToBlogString(url, msg);
-    }
+    std::string msg = Json::UrlToProto(url);
 
     // 把转换好的string发给服务器
     client->ToSend(msg_id, msg);
