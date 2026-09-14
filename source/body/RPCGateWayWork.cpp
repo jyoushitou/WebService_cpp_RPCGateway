@@ -4,7 +4,6 @@
 #include "ProtoBufToJson.h"
 
 #include "Common.pb.h"
-#include "Blog.pb.h"
 
 // 服务器ID
 int Utils::serviceID = 1;
@@ -162,7 +161,7 @@ std::string HandleVueBiz(std::shared_ptr<Net::Server::HttpServer::HttpSession> s
     // 变量
     if (url.head.serviceid() == 1)
     {
-        UrlToBlogString(url, msg);
+        Json::blog::UrlToBlogString(url, msg);
     }
 
     // 把转换好的string发给服务器
